@@ -35,7 +35,10 @@ TEMPLATE = """<!doctype html>
   <div class="section">
     <h2>Performance summary</h2>
     <p>Overall win rate: {{ overall_win_rate }}% &nbsp;|&nbsp; Profit factor: {{ overall_profit_factor }}</p>
-    {{ perf_table|safe }}
+    <h3>5-day performance by year</h3>
+    {{ perf_table_5|safe }}
+    <h3>10-day performance by year</h3>
+    {{ perf_table_10|safe }}
   </div>
 
   <div class="section">
@@ -119,11 +122,14 @@ def build_report(csv_path: str, out_path: str) -> None:
 
     # Performance summary (overall and by year)
     # Define columns to use
-    win_col = retraced10_col
-    retrace_pct_col = 'retrace_percentage_10d' if 'retrace_percentage_10d' in df.columns else ('retrace_percentage' if 'retrace_percentage' in df.columns else None)
+    win_col_10 = retraced10_col
+    win_col_5 = retraced5_col
+    retrace_pct_10_col = 'retrace_percentage_10d' if 'retrace_percentage_10d' in df.columns else ('retrace_percentage' if 'retrace_percentage' in df.columns else None)
+    retrace_pct_5_col = 'retrace_percentage_5d' if 'retrace_percentage_5d' in df.columns else None
 
-    if retrace_pct_col:
-        df['retrace_frac_10d'] = pd.to_numeric(df[retrace_pct_col], errors='coerce') / 100.0
+    # Build fractional retrace columns for PF computation
+    if retrace_pct_10_col:
+        df['retrace_frac_10d'] = pd.to_numeric(df[retrace_pct_10_col], errors='coerce') / 100.0
         df['retrace_frac_10d'] = df['retrace_frac_10d'].clip(lower=0.0, upper=1.0).fillna(0.0)
         profit_units_total = float(df['retrace_frac_10d'].sum())
         loss_units_total = float((1.0 - df['retrace_frac_10d']).sum())
@@ -133,35 +139,63 @@ def build_report(csv_path: str, out_path: str) -> None:
         df['retrace_frac_10d'] = np.nan
         overall_profit_factor = "n/a"
 
-    if win_col and win_col in df.columns and len(df) > 0:
-        overall_win_rate = f"{(100.0 * pd.to_numeric(df[win_col], errors='coerce').fillna(0).astype(float).mean()):.2f}"
+    if retrace_pct_5_col:
+        df['retrace_frac_5d'] = pd.to_numeric(df[retrace_pct_5_col], errors='coerce') / 100.0
+        df['retrace_frac_5d'] = df['retrace_frac_5d'].clip(lower=0.0, upper=1.0).fillna(0.0)
+    else:
+        df['retrace_frac_5d'] = np.nan
+
+    # Overall win rate (10d-based to match prior behavior)
+    if win_col_10 and win_col_10 in df.columns and len(df) > 0:
+        overall_win_rate = f"{(100.0 * pd.to_numeric(df[win_col_10], errors='coerce').fillna(0).astype(float).mean()):.2f}"
     else:
         overall_win_rate = "n/a"
 
-    # Yearly segmentation
+    # Yearly segmentation tables for 5d and 10d
     if 'date' in df.columns and not df['date'].isna().all():
         df_year = df.copy()
         df_year['year'] = df_year['date'].dt.year
-        perf_rows = []
+
+        # 5d table
+        rows5 = []
         for y, g in df_year.groupby('year', dropna=True):
             trades = int(len(g))
-            if win_col and win_col in g.columns and trades > 0:
-                wr = 100.0 * pd.to_numeric(g[win_col], errors='coerce').fillna(0).astype(float).mean()
+            if win_col_5 and win_col_5 in g.columns and trades > 0:
+                wr5 = 100.0 * pd.to_numeric(g[win_col_5], errors='coerce').fillna(0).astype(float).mean()
             else:
-                wr = np.nan
+                wr5 = np.nan
+            if 'retrace_frac_5d' in g.columns and not g['retrace_frac_5d'].isna().all():
+                p5 = float(g['retrace_frac_5d'].sum())
+                l5 = float((1.0 - g['retrace_frac_5d']).sum())
+                pf5 = np.inf if p5 > 0 and l5 == 0 else (p5 / l5 if l5 > 0 else np.nan)
+            else:
+                pf5 = np.nan
+            rows5.append({'Year': int(y), 'Trades': trades, 'Win Rate %': round(wr5, 2) if pd.notna(wr5) else np.nan,
+                          'Profit Factor': (round(pf5, 2) if np.isfinite(pf5) else (np.nan if np.isnan(pf5) else np.inf))})
+        perf_df_5 = pd.DataFrame(rows5).sort_values('Year') if rows5 else pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor'])
+        perf_table_5_html = perf_df_5.to_html(index=False)
+
+        # 10d table
+        rows10 = []
+        for y, g in df_year.groupby('year', dropna=True):
+            trades = int(len(g))
+            if win_col_10 and win_col_10 in g.columns and trades > 0:
+                wr10 = 100.0 * pd.to_numeric(g[win_col_10], errors='coerce').fillna(0).astype(float).mean()
+            else:
+                wr10 = np.nan
             if 'retrace_frac_10d' in g.columns and not g['retrace_frac_10d'].isna().all():
-                p = float(g['retrace_frac_10d'].sum())
-                l = float((1.0 - g['retrace_frac_10d']).sum())
-                pf = np.inf if p > 0 and l == 0 else (p / l if l > 0 else np.nan)
+                p10 = float(g['retrace_frac_10d'].sum())
+                l10 = float((1.0 - g['retrace_frac_10d']).sum())
+                pf10 = np.inf if p10 > 0 and l10 == 0 else (p10 / l10 if l10 > 0 else np.nan)
             else:
-                pf = np.nan
-            perf_rows.append({'Year': int(y), 'Trades': trades, 'Win Rate %': round(wr, 2) if pd.notna(wr) else np.nan,
-                              'Profit Factor': (round(pf, 2) if np.isfinite(pf) else (np.nan if np.isnan(pf) else np.inf))})
-        perf_df = pd.DataFrame(perf_rows).sort_values('Year') if perf_rows else pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor'])
-        # Render table with reasonable formatting
-        perf_table_html = perf_df.to_html(index=False)
+                pf10 = np.nan
+            rows10.append({'Year': int(y), 'Trades': trades, 'Win Rate %': round(wr10, 2) if pd.notna(wr10) else np.nan,
+                           'Profit Factor': (round(pf10, 2) if np.isfinite(pf10) else (np.nan if np.isnan(pf10) else np.inf))})
+        perf_df_10 = pd.DataFrame(rows10).sort_values('Year') if rows10 else pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor'])
+        perf_table_10_html = perf_df_10.to_html(index=False)
     else:
-        perf_table_html = pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor']).to_html(index=False)
+        perf_table_5_html = pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor']).to_html(index=False)
+        perf_table_10_html = pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor']).to_html(index=False)
 
     # Charts
     fig_daily_5 = px.line(daily, x='date', y='rate5', title='Daily 5d retracement rate (%)') if not daily.empty else px.scatter(title='No daily data')
@@ -234,7 +268,8 @@ def build_report(csv_path: str, out_path: str) -> None:
         direction=direction,
         overall_win_rate=overall_win_rate,
         overall_profit_factor=overall_profit_factor,
-        perf_table=perf_table_html,
+        perf_table_5=perf_table_5_html,
+        perf_table_10=perf_table_10_html,
         fig_daily_5=fig_daily_5.to_html(include_plotlyjs='cdn', full_html=False),
         fig_daily_10=fig_daily_10.to_html(include_plotlyjs=False, full_html=False),
         fig_gap_hist=fig_gap_hist.to_html(include_plotlyjs=False, full_html=False),
