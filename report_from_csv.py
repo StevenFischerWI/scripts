@@ -93,13 +93,13 @@ def build_report(csv_path: str, out_path: str) -> None:
     # Daily summary
     grp = df.groupby('date') if 'date' in df.columns else None
     if grp is not None:
-        agg_map = {'ticker': 'count'}
+        # Use named aggregation with output column names
+        agg_kwargs = {'total': ('ticker', 'count')}
         if retraced5_col:
-            agg_map['retraced5'] = (retraced5_col, 'sum')
+            agg_kwargs['retraced5'] = (retraced5_col, 'sum')
         if retraced10_col:
-            agg_map['retraced10'] = (retraced10_col, 'sum')
-        daily = grp.agg(**agg_map).reset_index()
-        daily.rename(columns={'ticker': 'total'}, inplace=True)
+            agg_kwargs['retraced10'] = (retraced10_col, 'sum')
+        daily = grp.agg(**agg_kwargs).reset_index()
         if 'retraced5' in daily.columns:
             daily['rate5'] = 100 * daily['retraced5'] / daily['total']
         else:
