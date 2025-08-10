@@ -399,7 +399,8 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
     """
     post_df = pd.read_sql_query(post_query, conn, params=(date, end_date_10, symbols))
     post_df = post_df.drop_duplicates(subset=['symbol', 'date'], keep='first')
-    post_df['date'] = pd.to_datetime(post_df['date']) if not post_df.empty else post_df
+    if not post_df.empty:
+        post_df['date'] = pd.to_datetime(post_df['date'])
 
     # Gap day prices mapped by symbol
     open_by_symbol = dict(zip(gap_ups['symbol'], gap_ups['open']))
