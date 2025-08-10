@@ -484,6 +484,7 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
             'retracement_rate_5d': 0.0,
             'retraced_to_vwap': 0,
             'retracement_rate': 0.0,
+            'csv_rows': [],  # Add empty csv_rows
             'details': []
         }
     
@@ -546,6 +547,7 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
                 'retracement_rate_5d': 0.0,
                 'retraced_to_vwap': 0,
                 'retracement_rate': 0.0,
+                'csv_rows': [],  # Add empty csv_rows
                 'details': []
             }
 
