@@ -308,6 +308,120 @@ def get_spy_daily_gain(conn, gap_date: str) -> float:
     
     return df['daily_gain_percent'].iloc[0]
 
+def calculate_21_ema(conn, symbol: str, gap_date: str) -> float:
+    """Calculate 21-period EMA up to gap date."""
+    query = """
+    SELECT close, date
+    FROM candle 
+    WHERE symbol = %s AND date <= %s
+    ORDER BY date DESC
+    LIMIT 50
+    """
+    df = pd.read_sql_query(query, conn, params=(symbol, gap_date))
+    if len(df) < 21:
+        return None
+    
+    # Sort by date ascending for EMA calculation
+    df = df.sort_values('date')
+    ema = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
+    return float(ema)
+
+def get_multiple_sma_distances(conn, symbol: str, gap_date: str, close_price: float) -> Dict[str, float]:
+    """Get distances from 21, 50, 100, 200 SMAs."""
+    periods = [21, 50, 100, 200]
+    distances = {}
+    
+    for period in periods:
+        query = """
+        SELECT close
+        FROM candle 
+        WHERE symbol = %s AND date <= %s
+        ORDER BY date DESC
+        LIMIT %s
+        """
+        df = pd.read_sql_query(query, conn, params=(symbol, gap_date, period))
+        
+        if len(df) >= period:
+            sma = df['close'].mean()
+            distance_pct = ((close_price - sma) / sma) * 100 if sma > 0 else None
+            distances[f'sma_{period}_distance_percent'] = distance_pct
+        else:
+            distances[f'sma_{period}_distance_percent'] = None
+    
+    return distances
+
+def get_quarterly_avwap_distances(conn, symbol: str, gap_date: str, close_price: float) -> Dict[str, float]:
+    """Get distances from quarterly AVWAPs (current quarter, 2Q ago, 3Q ago, 1Y ago)."""
+    gap_date_dt = datetime.strptime(gap_date, '%Y-%m-%d')
+    distances = {}
+    
+    # Define quarter start dates
+    current_quarter_start = datetime(gap_date_dt.year, ((gap_date_dt.month - 1) // 3) * 3 + 1, 1)
+    
+    quarters = {
+        'current': current_quarter_start,
+        '2q_ago': current_quarter_start - timedelta(days=180),  # Approx 2 quarters
+        '3q_ago': current_quarter_start - timedelta(days=270),  # Approx 3 quarters  
+        '1y_ago': current_quarter_start - timedelta(days=365)   # 1 year ago
+    }
+    
+    for period_name, quarter_start in quarters.items():
+        quarter_start_str = quarter_start.strftime('%Y-%m-%d')
+        
+        query = """
+        SELECT high, low, close, COALESCE(volume, 0) as volume
+        FROM candle 
+        WHERE symbol = %s 
+        AND date >= %s 
+        AND date <= %s
+        ORDER BY date
+        """
+        
+        df = pd.read_sql_query(query, conn, params=(symbol, quarter_start_str, gap_date))
+        
+        if not df.empty:
+            avwap = calculate_vwap(df)
+            if avwap > 0:
+                distance_pct = ((close_price - avwap) / avwap) * 100
+                distances[f'avwap_{period_name}_distance_percent'] = distance_pct
+            else:
+                distances[f'avwap_{period_name}_distance_percent'] = None
+        else:
+            distances[f'avwap_{period_name}_distance_percent'] = None
+    
+    return distances
+
+def check_21ema_retracement(conn, symbol: str, gap_date: str, ema_21: float, gap_mode: str, days_to_check: int = 10) -> Tuple[bool, Optional[int]]:
+    """Check if stock retraced to 21 EMA within specified days."""
+    if ema_21 is None:
+        return False, None
+        
+    end_date = (datetime.strptime(gap_date, '%Y-%m-%d') + timedelta(days=days_to_check)).strftime('%Y-%m-%d')
+    
+    query = """
+    SELECT date, high, low,
+           ROW_NUMBER() OVER (ORDER BY date ASC) AS rn
+    FROM candle 
+    WHERE symbol = %s 
+    AND date > %s 
+    AND date <= %s
+    ORDER BY date
+    """
+    
+    df = pd.read_sql_query(query, conn, params=(symbol, gap_date, end_date))
+    
+    if df.empty:
+        return False, None
+    
+    # Check each day to find when it first retraced to 21 EMA
+    for _, row in df.iterrows():
+        if gap_mode == 'up' and row['low'] <= ema_21:
+            return True, int(row['rn'])
+        elif gap_mode == 'down' and row['high'] >= ema_21:
+            return True, int(row['rn'])
+    
+    return False, None
+
 def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') -> Dict:
     """Analyze gap-ups for a specific date and write results to CSV."""
     logging.info(f"Analyzing gap-{gap_mode}s for {date}...")
@@ -554,6 +668,17 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
         mfe5, mae5, mfe5p, mae5p = mfe_mae_5_map.get(symbol, (0.0, 0.0, 0.0, 0.0))
         mfe10, mae10, mfe10p, mae10p = mfe_mae_10_map.get(symbol, (0.0, 0.0, 0.0, 0.0))
 
+        # Calculate 21 EMA and retracement
+        ema_21 = calculate_21_ema(conn, symbol, date)
+        ema_21_retraced_5d, ema_21_days_5d = check_21ema_retracement(conn, symbol, date, ema_21, gap_mode, 5)
+        ema_21_retraced_10d, ema_21_days_10d = check_21ema_retracement(conn, symbol, date, ema_21, gap_mode, 10)
+        
+        # Calculate multiple SMA distances
+        sma_distances = get_multiple_sma_distances(conn, symbol, date, close_price)
+        
+        # Calculate quarterly AVWAP distances
+        quarterly_distances = get_quarterly_avwap_distances(conn, symbol, date, close_price)
+
         csv_rows.append({
             'ticker': symbol,
             'date': date,
@@ -575,7 +700,20 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
             'mae_dollars_10d': round(mae10, 2),
             'mfe_percent_10d': round(mfe10p, 2),
             'mae_percent_10d': round(mae10p, 2),
+            'ema_21': round(ema_21, 2) if ema_21 is not None else '',
+            'retraced_to_21ema_5d': ema_21_retraced_5d,
+            'days_to_21ema_5d': ema_21_days_5d if ema_21_days_5d is not None else '',
+            'retraced_to_21ema_10d': ema_21_retraced_10d,
+            'days_to_21ema_10d': ema_21_days_10d if ema_21_days_10d is not None else '',
+            'sma_21_distance_percent': round(sma_distances['sma_21_distance_percent'], 2) if sma_distances['sma_21_distance_percent'] is not None else '',
+            'sma_50_distance_percent': round(sma_distances['sma_50_distance_percent'], 2) if sma_distances['sma_50_distance_percent'] is not None else '',
+            'sma_100_distance_percent': round(sma_distances['sma_100_distance_percent'], 2) if sma_distances['sma_100_distance_percent'] is not None else '',
+            'sma_200_distance_percent': round(sma_distances['sma_200_distance_percent'], 2) if sma_distances['sma_200_distance_percent'] is not None else '',
             'sma_330_distance_percent': round(sma_330_distance, 2) if sma_330_distance is not None else '',
+            'avwap_current_distance_percent': round(quarterly_distances['avwap_current_distance_percent'], 2) if quarterly_distances['avwap_current_distance_percent'] is not None else '',
+            'avwap_2q_ago_distance_percent': round(quarterly_distances['avwap_2q_ago_distance_percent'], 2) if quarterly_distances['avwap_2q_ago_distance_percent'] is not None else '',
+            'avwap_3q_ago_distance_percent': round(quarterly_distances['avwap_3q_ago_distance_percent'], 2) if quarterly_distances['avwap_3q_ago_distance_percent'] is not None else '',
+            'avwap_1y_ago_distance_percent': round(quarterly_distances['avwap_1y_ago_distance_percent'], 2) if quarterly_distances['avwap_1y_ago_distance_percent'] is not None else '',
             'spy_daily_gain_percent': round(spy_daily_gain, 2) if spy_daily_gain is not None else ''
         })
 
@@ -692,7 +830,10 @@ def main():
                 'ticker','date','gap_up_percent','open_price','close_price','anchored_vwap',
                 'retraced_to_vwap_5d','days_to_retrace_5d','retrace_percentage_5d','mfe_dollars_5d','mae_dollars_5d','mfe_percent_5d','mae_percent_5d',
                 'retraced_to_vwap_10d','days_to_retrace_10d','retrace_percentage_10d','mfe_dollars_10d','mae_dollars_10d','mfe_percent_10d','mae_percent_10d',
-                'sma_330_distance_percent','spy_daily_gain_percent'
+                'ema_21','retraced_to_21ema_5d','days_to_21ema_5d','retraced_to_21ema_10d','days_to_21ema_10d',
+                'sma_21_distance_percent','sma_50_distance_percent','sma_100_distance_percent','sma_200_distance_percent','sma_330_distance_percent',
+                'avwap_current_distance_percent','avwap_2q_ago_distance_percent','avwap_3q_ago_distance_percent','avwap_1y_ago_distance_percent',
+                'spy_daily_gain_percent'
             ]
             csv_writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             csv_writer.writeheader()
