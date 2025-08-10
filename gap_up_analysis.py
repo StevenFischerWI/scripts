@@ -315,10 +315,12 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
     gap_ups = find_gap_ups(conn, date, gap_mode=gap_mode)
     
     if gap_ups.empty:
-        logging.info(f"No gap-ups found for {date}")
+        logging.info(f"No gap-{gap_mode}s found for {date}")
         return {
             'date': date,
             'total_gap_ups': 0,
+            'retraced_to_vwap_5d': 0,
+            'retracement_rate_5d': 0.0,
             'retraced_to_vwap': 0,
             'retracement_rate': 0.0,
             'details': []
@@ -379,6 +381,8 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
             return {
                 'date': date,
                 'total_gap_ups': 0,
+                'retraced_to_vwap_5d': 0,
+                'retracement_rate_5d': 0.0,
                 'retraced_to_vwap': 0,
                 'retracement_rate': 0.0,
                 'details': []
