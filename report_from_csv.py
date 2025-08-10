@@ -99,6 +99,12 @@ TEMPLATE = """<!doctype html>
   </div>
 
   <div class="section">
+    <h2>Expected P&L (10k/trade) — Equity Curve</h2>
+    <p>Total expected P&L 5d: {{ total_pnl_5d }} &nbsp;|&nbsp; 10d: {{ total_pnl_10d }}</p>
+    {{ fig_equity_both|safe }}
+  </div>
+
+  <div class="section">
     <h2>Gap size vs 10d retrace %</h2>
     {{ fig_scatter|safe }}
   </div>
@@ -507,6 +513,62 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_spy_bucket_5 = px.scatter(title='Win rate vs SPY daily change (5d) — no data')
         fig_spy_bucket_10 = px.scatter(title='Win rate vs SPY daily change (10d) — no data')
 
+    # Expected P&L (10k per trade) and equity curve (5d vs 10d)
+    # Assumptions:
+    # - Entry at open_price on gap day
+    # - Exit when/if AVWAP is reached within horizon, otherwise best favorable extreme within horizon
+    # - Expected P&L uses retrace_percentage_*d (clipped to 100%) times distance to AVWAP
+    if all(col in df.columns for col in ['anchored_vwap', 'open_price']) and (('retrace_percentage_5d' in df.columns) or ('retrace_percentage_10d' in df.columns or 'retrace_percentage' in df.columns)):
+        dfp = df.copy()
+        dfp['open_price'] = pd.to_numeric(dfp['open_price'], errors='coerce')
+        dfp['anchored_vwap'] = pd.to_numeric(dfp['anchored_vwap'], errors='coerce')
+        dfp['distance'] = (dfp['anchored_vwap'] - dfp['open_price']).abs()
+        dfp['shares'] = np.where(dfp['open_price'] > 0, 10000.0 / dfp['open_price'], 0.0)
+
+        if 'retrace_percentage_5d' in dfp.columns:
+            f5 = pd.to_numeric(dfp['retrace_percentage_5d'], errors='coerce') / 100.0
+            dfp['pnl_5'] = dfp['shares'] * dfp['distance'] * f5.clip(lower=0.0, upper=1.0)
+        else:
+            dfp['pnl_5'] = np.nan
+
+        r10_col = 'retrace_percentage_10d' if 'retrace_percentage_10d' in dfp.columns else ('retrace_percentage' if 'retrace_percentage' in dfp.columns else None)
+        if r10_col:
+            f10 = pd.to_numeric(dfp[r10_col], errors='coerce') / 100.0
+            dfp['pnl_10'] = dfp['shares'] * dfp['distance'] * f10.clip(lower=0.0, upper=1.0)
+        else:
+            dfp['pnl_10'] = np.nan
+
+        # Build equity curves by cumulative sum ordered by date (or original order if date missing)
+        if 'date' in dfp.columns and not dfp['date'].isna().all():
+            dfp_sorted = dfp.sort_values('date')
+            x_axis = pd.to_datetime(dfp_sorted['date'], errors='coerce')
+        else:
+            dfp_sorted = dfp.copy()
+            dfp_sorted['_idx'] = np.arange(len(dfp_sorted))
+            x_axis = dfp_sorted['_idx']
+
+        equity_parts = []
+        if 'pnl_5' in dfp_sorted.columns and not dfp_sorted['pnl_5'].isna().all():
+            equity_5 = pd.DataFrame({'x': x_axis, 'equity': dfp_sorted['pnl_5'].fillna(0).cumsum(), 'horizon': '5d'})
+            equity_parts.append(equity_5)
+        if 'pnl_10' in dfp_sorted.columns and not dfp_sorted['pnl_10'].isna().all():
+            equity_10 = pd.DataFrame({'x': x_axis, 'equity': dfp_sorted['pnl_10'].fillna(0).cumsum(), 'horizon': '10d'})
+            equity_parts.append(equity_10)
+
+        if equity_parts:
+            equity_df = pd.concat(equity_parts, ignore_index=True)
+            fig_equity_both = px.line(equity_df, x='x', y='equity', color='horizon', markers=False, title='Equity Curve (Expected P&L, $10k per trade)')
+        else:
+            fig_equity_both = px.scatter(title='Equity Curve (no data)')
+
+        total_pnl_5d = (f"${dfp['pnl_5'].sum():,.0f}" if 'pnl_5' in dfp.columns and not dfp['pnl_5'].isna().all() else "n/a")
+        total_pnl_10d = (f"${dfp['pnl_10'].sum():,.0f}" if 'pnl_10' in dfp.columns and not dfp['pnl_10'].isna().all() else "n/a")
+    else:
+        import plotly.graph_objects as go
+        fig_equity_both = go.Figure().update_layout(title='Equity Curve (insufficient data)')
+        total_pnl_5d = "n/a"
+        total_pnl_10d = "n/a"
+
     # Gap vs retrace scatter (10d)
     ycol = 'retrace_percentage_10d' if 'retrace_percentage_10d' in df.columns else None
     color_col = retraced10_col
@@ -570,6 +632,9 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_sma330_bucket_10=fig_sma330_bucket_10.to_html(include_plotlyjs=False, full_html=False),
         fig_spy_bucket_5=fig_spy_bucket_5.to_html(include_plotlyjs=False, full_html=False),
         fig_spy_bucket_10=fig_spy_bucket_10.to_html(include_plotlyjs=False, full_html=False),
+        fig_equity_both=fig_equity_both.to_html(include_plotlyjs=False, full_html=False),
+        total_pnl_5d=total_pnl_5d,
+        total_pnl_10d=total_pnl_10d,
         fig_scatter=fig_scatter.to_html(include_plotlyjs=False, full_html=False),
         fig_spy=fig_spy.to_html(include_plotlyjs=False, full_html=False),
         top_mfe=top_html
