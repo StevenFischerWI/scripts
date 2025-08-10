@@ -49,6 +49,12 @@ TEMPLATE = """<!doctype html>
   </div>
 
   <div class="section">
+    <h2>Monthly win rates</h2>
+    {{ fig_monthly_5|safe }}
+    {{ fig_monthly_10|safe }}
+  </div>
+
+  <div class="section">
     <h2>Gap size distribution</h2>
     {{ fig_gap_hist|safe }}
   </div>
@@ -253,6 +259,29 @@ def build_report(csv_path: str, out_path: str) -> None:
     fig_daily_5 = px.line(daily, x='date', y='rate5', title='Daily 5d retracement rate (%)') if not daily.empty else px.scatter(title='No daily data')
     fig_daily_10 = px.line(daily, x='date', y='rate10', title='Daily 10d retracement rate (%)') if not daily.empty else px.scatter(title='No daily data')
 
+    # Monthly win rate charts (5d and 10d)
+    if 'date' in df.columns and not df['date'].isna().all():
+        df_m = df.copy()
+        df_m['month'] = df_m['date'].dt.to_period('M').dt.to_timestamp()
+        if retraced5_col:
+            df_m['retr5_num'] = pd.to_numeric(df_m[retraced5_col], errors='coerce').fillna(0).astype(float)
+            monthly_5 = (df_m.groupby('month', dropna=True)['retr5_num'].mean().reset_index(name='rate'))
+            monthly_5['rate'] = 100 * monthly_5['rate']
+            fig_monthly_5 = px.bar(monthly_5, x='month', y='rate', title='Monthly 5d win rate (%)')
+        else:
+            fig_monthly_5 = px.scatter(title='Monthly 5d win rate (n/a)')
+        if retraced10_col:
+            df_m['retr10_num'] = pd.to_numeric(df_m[retraced10_col], errors='coerce').fillna(0).astype(float)
+            monthly_10 = (df_m.groupby('month', dropna=True)['retr10_num'].mean().reset_index(name='rate'))
+            monthly_10['rate'] = 100 * monthly_10['rate']
+            fig_monthly_10 = px.bar(monthly_10, x='month', y='rate', title='Monthly 10d win rate (%)')
+        else:
+            fig_monthly_10 = px.scatter(title='Monthly 10d win rate (n/a)')
+    else:
+        import plotly.graph_objects as go
+        fig_monthly_5 = go.Figure().update_layout(title='Monthly 5d win rate (no dates)')
+        fig_monthly_10 = go.Figure().update_layout(title='Monthly 10d win rate (no dates)')
+
     # Gap histogram
     if 'gap_up_percent' in df.columns and not df.empty:
         fig_gap_hist = px.histogram(df, x='gap_up_percent', nbins=40, title='Gap size (%)', marginal='box')
@@ -324,6 +353,8 @@ def build_report(csv_path: str, out_path: str) -> None:
         perf_table_10=perf_table_10_html,
         fig_daily_5=fig_daily_5.to_html(include_plotlyjs='cdn', full_html=False),
         fig_daily_10=fig_daily_10.to_html(include_plotlyjs=False, full_html=False),
+        fig_monthly_5=fig_monthly_5.to_html(include_plotlyjs=False, full_html=False),
+        fig_monthly_10=fig_monthly_10.to_html(include_plotlyjs=False, full_html=False),
         fig_gap_hist=fig_gap_hist.to_html(include_plotlyjs=False, full_html=False),
         fig_bucket=fig_bucket.to_html(include_plotlyjs=False, full_html=False),
         fig_scatter=fig_scatter.to_html(include_plotlyjs=False, full_html=False),
