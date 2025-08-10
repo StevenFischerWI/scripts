@@ -298,23 +298,11 @@ def build_report(csv_path: str, out_path: str) -> None:
             else:
                 pf5 = np.nan
 
-            # Averages for 5d MFE/MAE percent
-            if 'mfe_percent_5d' in g.columns:
-                avg_mfe5p = pd.to_numeric(g['mfe_percent_5d'], errors='coerce').mean()
-            else:
-                avg_mfe5p = np.nan
-            if 'mae_percent_5d' in g.columns:
-                avg_mae5p = pd.to_numeric(g['mae_percent_5d'], errors='coerce').mean()
-            else:
-                avg_mae5p = np.nan
-
             rows5.append({
                 'Year': int(y),
                 'Trades': trades,
                 'Win Rate %': round(wr5, 2) if pd.notna(wr5) else np.nan,
-                'Profit Factor': (round(pf5, 2) if np.isfinite(pf5) else (np.nan if np.isnan(pf5) else np.inf)),
-                'Avg MFE %': round(avg_mfe5p, 2) if pd.notna(avg_mfe5p) else np.nan,
-                'Avg MAE %': round(avg_mae5p, 2) if pd.notna(avg_mae5p) else np.nan
+                'Profit Factor': (round(pf5, 2) if np.isfinite(pf5) else (np.nan if np.isnan(pf5) else np.inf))
             })
         perf_df_5 = pd.DataFrame(rows5).sort_values('Year') if rows5 else pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor'])
         perf_table_5_html = perf_df_5.to_html(index=False)
@@ -334,23 +322,11 @@ def build_report(csv_path: str, out_path: str) -> None:
             else:
                 pf10 = np.nan
 
-            # Averages for 10d MFE/MAE percent
-            if 'mfe_percent_10d' in g.columns:
-                avg_mfe10p = pd.to_numeric(g['mfe_percent_10d'], errors='coerce').mean()
-            else:
-                avg_mfe10p = np.nan
-            if 'mae_percent_10d' in g.columns:
-                avg_mae10p = pd.to_numeric(g['mae_percent_10d'], errors='coerce').mean()
-            else:
-                avg_mae10p = np.nan
-
             rows10.append({
                 'Year': int(y),
                 'Trades': trades,
                 'Win Rate %': round(wr10, 2) if pd.notna(wr10) else np.nan,
-                'Profit Factor': (round(pf10, 2) if np.isfinite(pf10) else (np.nan if np.isnan(pf10) else np.inf)),
-                'Avg MFE %': round(avg_mfe10p, 2) if pd.notna(avg_mfe10p) else np.nan,
-                'Avg MAE %': round(avg_mae10p, 2) if pd.notna(avg_mae10p) else np.nan
+                'Profit Factor': (round(pf10, 2) if np.isfinite(pf10) else (np.nan if np.isnan(pf10) else np.inf))
             })
         perf_df_10 = pd.DataFrame(rows10).sort_values('Year') if rows10 else pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor'])
         perf_table_10_html = perf_df_10.to_html(index=False)
