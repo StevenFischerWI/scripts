@@ -240,8 +240,14 @@ def get_mfe_mae_10_days(conn, symbol: str, gap_date: str, close_price: float) ->
 
 def get_sma_330_distance(conn, symbol: str, gap_date: str, close_price: float) -> float:
     """
-    Get the distance from 330-period simple moving average as percentage of close price.
-    Returns the percentage distance (positive if above SMA, negative if below).
+    Compute the percent difference between the gap-day close and the 330-day Simple Moving Average (SMA).
+
+    Definition:
+        sma_330_distance_percent = 100 * (gap_day_close - SMA_330) / SMA_330
+
+    Interpretation:
+        Positive => close above SMA_330
+        Negative => close below SMA_330
     """
     # Get 330 days of data before the gap date (plus some buffer for weekends/holidays)
     start_date = (datetime.strptime(gap_date, '%Y-%m-%d') - timedelta(days=500)).strftime('%Y-%m-%d')
