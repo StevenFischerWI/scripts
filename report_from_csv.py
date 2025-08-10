@@ -40,7 +40,6 @@ TEMPLATE = """<!doctype html>
     <h2>Table of Contents</h2>
     <ul>
       <li><a href="#performance">Performance summary</a></li>
-      <li><a href="#monthly-retracement">Monthly retracement rates</a></li>
       <li><a href="#monthly-win">Monthly win rates</a></li>
       <li><a href="#monthly-comparison">Monthly win rate (5d vs 10d)</a></li>
       <li><a href="#gap-distribution">Gap size distribution</a></li>
@@ -65,12 +64,6 @@ TEMPLATE = """<!doctype html>
     {{ perf_table_5|safe }}
     <h3>10-day performance by year</h3>
     {{ perf_table_10|safe }}
-  </div>
-
-  <div class="section" id="monthly-retracement">
-    <h2>Monthly retracement rates</h2>
-    {{ fig_daily_5|safe }}
-    {{ fig_daily_10|safe }}
   </div>
 
   <div class="section" id="monthly-win">
@@ -724,8 +717,6 @@ def build_report(csv_path: str, out_path: str) -> None:
         gap_close_rate_10d=gap_close_rate_10d,
         perf_table_5=perf_table_5_html,
         perf_table_10=perf_table_10_html,
-        fig_daily_5=fig_daily_5.to_html(include_plotlyjs='cdn', full_html=False),
-        fig_daily_10=fig_daily_10.to_html(include_plotlyjs=False, full_html=False),
         fig_monthly_5=fig_monthly_5.to_html(include_plotlyjs=False, full_html=False),
         fig_monthly_10=fig_monthly_10.to_html(include_plotlyjs=False, full_html=False),
         fig_monthly_both=fig_monthly_both.to_html(include_plotlyjs=False, full_html=False),
