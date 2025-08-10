@@ -58,7 +58,7 @@ TEMPLATE = """<!doctype html>
 
   <div class="section" id="performance">
     <h2>Performance summary</h2>
-    <p>Overall win rate: 5d: {{ overall_win_rate_5d }}% | 10d: {{ overall_win_rate_10d }}% &nbsp;|&nbsp; Profit factor: 5d: {{ overall_profit_factor_5d }} | 10d: {{ overall_profit_factor_10d }}</p>
+    <p>AVWAP retrace rate: 5d: {{ overall_win_rate_5d }}% | 10d: {{ overall_win_rate_10d }}% &nbsp;|&nbsp; Profit factor: 5d: {{ overall_profit_factor_5d }} | 10d: {{ overall_profit_factor_10d }}</p>
     <p>Gap closure rate: 5d: {{ gap_close_rate_5d }}% &nbsp;|&nbsp; 10d: {{ gap_close_rate_10d }}%</p>
     <p>21 EMA retrace rate: 5d: {{ ema_21_retrace_rate_5d }}% &nbsp;|&nbsp; 10d: {{ ema_21_retrace_rate_10d }}%</p>
     <h3>5-day performance by year</h3>
