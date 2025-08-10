@@ -900,7 +900,7 @@ def main():
         
         if args.parallel:
             # Parallel processing
-            max_workers = args.workers or min(cpu_count(), len(dates), 8)
+            max_workers = args.workers or min(cpu_count(), len(dates), 32)
             logging.info(f"Using parallel processing with {max_workers} workers")
             
             # Thread-safe CSV writing
