@@ -27,13 +27,37 @@ TEMPLATE = """<!doctype html>
     table{border-collapse:collapse}
     td,th{border:1px solid #ccc;padding:6px 8px}
     .meta{color:#555}
+    .index{background:#f5f5f5;padding:16px;margin:16px 0;border-radius:4px}
+    .index ul{margin:0;padding-left:20px}
+    .index li{margin:4px 0}
   </style>
 </head>
 <body>
   <h1>{{ title }}</h1>
   <p class="meta">Rows: {{ nrows }}, Dates: {{ ndates }}, Direction: {{ direction }}</p>
 
-  <div class="section">
+  <div class="index">
+    <h2>Table of Contents</h2>
+    <ul>
+      <li><a href="#performance">Performance summary</a></li>
+      <li><a href="#monthly-retracement">Monthly retracement rates</a></li>
+      <li><a href="#monthly-win">Monthly win rates</a></li>
+      <li><a href="#monthly-comparison">Monthly win rate (5d vs 10d)</a></li>
+      <li><a href="#gap-distribution">Gap size distribution</a></li>
+      <li><a href="#retracement-bucket">Retracement rate by gap bucket (10d)</a></li>
+      <li><a href="#win-gap">Win rate vs gap size</a></li>
+      <li><a href="#win-avwap">Win rate vs distance to AVWAP</a></li>
+      <li><a href="#win-sma330-above-below">Win rate: above vs below 330-SMA</a></li>
+      <li><a href="#win-sma330-bucket">Win rate by distance to 330-SMA</a></li>
+      <li><a href="#win-spy">Win rate vs SPY daily change</a></li>
+      <li><a href="#equity-curve">Expected P&L (10k/trade) — Equity Curve</a></li>
+      <li><a href="#gap-retrace-scatter">Gap size vs 10d retrace %</a></li>
+      <li><a href="#spy-retrace">SPY vs 10d retrace rate (by day)</a></li>
+      <li><a href="#top-mfe">Top 20 by 10d MFE%</a></li>
+    </ul>
+  </div>
+
+  <div class="section" id="performance">
     <h2>Performance summary</h2>
     <p>Overall win rate: {{ overall_win_rate }}% &nbsp;|&nbsp; Profit factor: {{ overall_profit_factor }}</p>
     <h3>5-day performance by year</h3>
@@ -42,79 +66,79 @@ TEMPLATE = """<!doctype html>
     {{ perf_table_10|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="monthly-retracement">
     <h2>Monthly retracement rates</h2>
     {{ fig_daily_5|safe }}
     {{ fig_daily_10|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="monthly-win">
     <h2>Monthly win rates</h2>
     {{ fig_monthly_5|safe }}
     {{ fig_monthly_10|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="monthly-comparison">
     <h2>Monthly win rate (5d vs 10d)</h2>
     {{ fig_monthly_both|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="gap-distribution">
     <h2>Gap size distribution</h2>
     {{ fig_gap_hist|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="retracement-bucket">
     <h2>Retracement rate by gap bucket (10d)</h2>
     {{ fig_bucket|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="win-gap">
     <h2>Win rate vs gap size</h2>
     {{ fig_gap_win_5|safe }}
     {{ fig_gap_win_10|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="win-avwap">
     <h2>Win rate vs distance to AVWAP</h2>
     {{ fig_avwap_win_5|safe }}
     {{ fig_avwap_win_10|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="win-sma330-above-below">
     <h2>Win rate: above vs below 330-SMA</h2>
     {{ fig_sma330_above_below|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="win-sma330-bucket">
     <h2>Win rate by distance to 330-SMA</h2>
     {{ fig_sma330_bucket_5|safe }}
     {{ fig_sma330_bucket_10|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="win-spy">
     <h2>Win rate vs SPY daily change</h2>
     {{ fig_spy_bucket_5|safe }}
     {{ fig_spy_bucket_10|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="equity-curve">
     <h2>Expected P&L (10k/trade) — Equity Curve</h2>
     <p>Total expected P&L 5d: {{ total_pnl_5d }} &nbsp;|&nbsp; 10d: {{ total_pnl_10d }}</p>
     {{ fig_equity_both|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="gap-retrace-scatter">
     <h2>Gap size vs 10d retrace %</h2>
     {{ fig_scatter|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="spy-retrace">
     <h2>SPY vs 10d retrace rate (by day)</h2>
     {{ fig_spy|safe }}
   </div>
 
-  <div class="section">
+  <div class="section" id="top-mfe">
     <h2>Top 20 by 10d MFE%</h2>
     {{ top_mfe|safe }}
   </div>
