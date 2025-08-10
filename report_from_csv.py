@@ -361,16 +361,18 @@ def build_report(csv_path: str, out_path: str) -> None:
         dist_bins = [0, 1, 2, 3, 5, 8, 12, 20, 1000]
         dist_labels = ['0–1', '1–2', '2–3', '3–5', '5–8', '8–12', '12–20', '20%+']
         dfv['dist_bucket'] = pd.cut(dfv['dist_pct'], bins=dist_bins, labels=dist_labels, right=False)
-        gv = dfv.dropna(subset=['dist_bucket']).groupby('dist_bucket', observed=False)
         if retraced5_col:
             dfv['win5'] = pd.to_numeric(dfv[retraced5_col], errors='coerce').fillna(0).astype(float)
+        if retraced10_col:
+            dfv['win10'] = pd.to_numeric(dfv[retraced10_col], errors='coerce').fillna(0).astype(float)
+        gv = dfv.dropna(subset=['dist_bucket']).groupby('dist_bucket', observed=False)
+        if retraced5_col:
             avwap_win_5 = (gv['win5'].mean().reset_index(name='rate'))
             avwap_win_5['rate'] = 100 * avwap_win_5['rate']
             fig_avwap_win_5 = px.bar(avwap_win_5, x='dist_bucket', y='rate', title='Win rate vs distance to AVWAP (5d, %)')
         else:
             fig_avwap_win_5 = px.scatter(title='Win rate vs distance to AVWAP (5d unavailable)')
         if retraced10_col:
-            dfv['win10'] = pd.to_numeric(dfv[retraced10_col], errors='coerce').fillna(0).astype(float)
             avwap_win_10 = (gv['win10'].mean().reset_index(name='rate'))
             avwap_win_10['rate'] = 100 * avwap_win_10['rate']
             fig_avwap_win_10 = px.bar(avwap_win_10, x='dist_bucket', y='rate', title='Win rate vs distance to AVWAP (10d, %)')
