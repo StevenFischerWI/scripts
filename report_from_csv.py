@@ -60,6 +60,7 @@ TEMPLATE = """<!doctype html>
     <h2>Performance summary</h2>
     <p>Overall win rate: 5d: {{ overall_win_rate_5d }}% | 10d: {{ overall_win_rate_10d }}% &nbsp;|&nbsp; Profit factor: 5d: {{ overall_profit_factor_5d }} | 10d: {{ overall_profit_factor_10d }}</p>
     <p>Gap closure rate: 5d: {{ gap_close_rate_5d }}% &nbsp;|&nbsp; 10d: {{ gap_close_rate_10d }}%</p>
+    <p>21 EMA retrace rate: 5d: {{ ema_21_retrace_rate_5d }}% &nbsp;|&nbsp; 10d: {{ ema_21_retrace_rate_10d }}%</p>
     <h3>5-day performance by year</h3>
     {{ perf_table_5|safe }}
     <h3>10-day performance by year</h3>
@@ -227,6 +228,14 @@ def build_report(csv_path: str, out_path: str) -> None:
     if retrace_pct_10_col and retrace_pct_10_col in df.columns and len(df) > 0:
         df['gap_closed_10d'] = pd.to_numeric(df[retrace_pct_10_col], errors='coerce') >= 100
         gap_close_rate_10d = f"{(100.0 * df['gap_closed_10d'].mean()):.2f}"
+
+    # Calculate 21 EMA retracement rates
+    ema_21_retrace_rate_5d = "n/a"
+    ema_21_retrace_rate_10d = "n/a"
+    if 'retraced_to_21ema_5d' in df.columns and len(df) > 0:
+        ema_21_retrace_rate_5d = f"{(100.0 * pd.to_numeric(df['retraced_to_21ema_5d'], errors='coerce').fillna(0).mean()):.2f}"
+    if 'retraced_to_21ema_10d' in df.columns and len(df) > 0:
+        ema_21_retrace_rate_10d = f"{(100.0 * pd.to_numeric(df['retraced_to_21ema_10d'], errors='coerce').fillna(0).mean()):.2f}"
 
     # Build fractional retrace columns for PF computation
     if retrace_pct_5_col:
@@ -715,6 +724,8 @@ def build_report(csv_path: str, out_path: str) -> None:
         overall_profit_factor_10d=overall_profit_factor_10d,
         gap_close_rate_5d=gap_close_rate_5d,
         gap_close_rate_10d=gap_close_rate_10d,
+        ema_21_retrace_rate_5d=ema_21_retrace_rate_5d,
+        ema_21_retrace_rate_10d=ema_21_retrace_rate_10d,
         perf_table_5=perf_table_5_html,
         perf_table_10=perf_table_10_html,
         fig_monthly_5=fig_monthly_5.to_html(include_plotlyjs=False, full_html=False),
