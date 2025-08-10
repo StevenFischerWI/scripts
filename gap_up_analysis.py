@@ -384,21 +384,28 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
                 'details': []
             }
 
-    # 10-day window after the gap day for retracement and MFE/MAE
+    # Next 10 TRADING days after the gap day (rn = 1..10) for retracement and MFE/MAE
     post_query = """
-    SELECT symbol, date, high, low
-    FROM (
+    WITH base AS (
         SELECT DISTINCT ON (symbol, date)
             symbol, date, high, low, COALESCE(volume, 0) AS volume
         FROM candle
-        WHERE date > %s AND date <= %s
+        WHERE date > %s
           AND symbol = ANY(%s)
         ORDER BY symbol, date, COALESCE(volume, 0) DESC
-    ) d
+    ),
+    next_days AS (
+        SELECT
+            symbol, date, high, low,
+            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date ASC) AS rn
+        FROM base
+    )
+    SELECT symbol, date, high, low, rn
+    FROM next_days
+    WHERE rn <= 10
     ORDER BY symbol, date
     """
-    post_df = pd.read_sql_query(post_query, conn, params=(date, end_date_10, symbols))
-    post_df = post_df.drop_duplicates(subset=['symbol', 'date'], keep='first')
+    post_df = pd.read_sql_query(post_query, conn, params=(date, symbols))
     if not post_df.empty:
         post_df['date'] = pd.to_datetime(post_df['date'])
 
@@ -406,48 +413,68 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
     open_by_symbol = dict(zip(gap_ups['symbol'], gap_ups['open']))
     close_by_symbol = dict(zip(gap_ups['symbol'], gap_ups['close']))
 
-    # Compute per-symbol retracement and MFE/MAE
-    retraced_map = {}
-    mfe_mae_map = {}
-    lowest_low_map = {}
-    highest_high_map = {}
+    # Compute per-symbol retracement and MFE/MAE for 5 and 10 trading days
+    retraced5_map, retraced10_map = {}, {}
+    days5_map, days10_map = {}, {}
+    ll5_map, ll10_map, hh5_map, hh10_map = {}, {}, {}, {}
+    mfe_mae_5_map, mfe_mae_10_map = {}, {}
+
     if not post_df.empty:
         for sym, g in post_df.groupby('symbol'):
-            lowest_low = g['low'].min()
-            highest_high = g['high'].max()
-            lowest_low_map[sym] = lowest_low
-            highest_high_map[sym] = highest_high
+            g5 = g[g['rn'] <= 5]
+            g10 = g[g['rn'] <= 10]
+
+            ll5 = g5['low'].min() if not g5.empty else np.nan
+            ll10 = g10['low'].min() if not g10.empty else np.nan
+            hh5 = g5['high'].max() if not g5.empty else np.nan
+            hh10 = g10['high'].max() if not g10.empty else np.nan
+
+            ll5_map[sym], ll10_map[sym] = ll5, ll10
+            hh5_map[sym], hh10_map[sym] = hh5, hh10
 
             avwap = anchored_vwap_map.get(sym, np.nan)
-            retraced = False
-            days_to_retrace = None
+
             if pd.notna(avwap):
                 if gap_mode == 'up':
-                    hit = g[g['low'] <= avwap]
+                    hit5 = g5[g5['low'] <= avwap]
+                    hit10 = g10[g10['low'] <= avwap]
                 else:
-                    hit = g[g['high'] >= avwap]
-                if not hit.empty:
-                    retraced = True
-                    first_hit_date = hit['date'].iloc[0]
-                    days_to_retrace = (first_hit_date - gap_date_dt).days
+                    hit5 = g5[g5['high'] >= avwap]
+                    hit10 = g10[g10['high'] >= avwap]
+            else:
+                hit5 = hit10 = pd.DataFrame()
 
+            retraced5 = not hit5.empty
+            retraced10 = not hit10.empty
+            retraced5_map[sym], retraced10_map[sym] = retraced5, retraced10
+            days5_map[sym] = int(hit5['rn'].iloc[0]) if retraced5 else None
+            days10_map[sym] = int(hit10['rn'].iloc[0]) if retraced10 else None
+
+            # MFE/MAE vs gap-day close
             close_price = close_by_symbol.get(sym, np.nan)
             if pd.notna(close_price) and close_price > 0:
-                mfe_dollars = highest_high - close_price
-                mae_dollars = close_price - lowest_low
-                mfe_percent = (mfe_dollars / close_price) * 100
-                mae_percent = (mae_dollars / close_price) * 100
-            else:
-                mfe_dollars = mae_dollars = mfe_percent = mae_percent = 0.0
+                mfe5 = (hh5 - close_price) if pd.notna(hh5) else 0.0
+                mae5 = (close_price - ll5) if pd.notna(ll5) else 0.0
+                mfe10 = (hh10 - close_price) if pd.notna(hh10) else 0.0
+                mae10 = (close_price - ll10) if pd.notna(ll10) else 0.0
 
-            retraced_map[sym] = (retraced, days_to_retrace)
-            mfe_mae_map[sym] = (mfe_dollars, mae_dollars, mfe_percent, mae_percent)
+                mfe5_pct = (mfe5 / close_price) * 100
+                mae5_pct = (mae5 / close_price) * 100
+                mfe10_pct = (mfe10 / close_price) * 100
+                mae10_pct = (mae10 / close_price) * 100
+            else:
+                mfe5 = mae5 = mfe10 = mae10 = 0.0
+                mfe5_pct = mae5_pct = mfe10_pct = mae10_pct = 0.0
+
+            mfe_mae_5_map[sym] = (mfe5, mae5, mfe5_pct, mae5_pct)
+            mfe_mae_10_map[sym] = (mfe10, mae10, mfe10_pct, mae10_pct)
     else:
         for sym in symbols:
-            lowest_low_map[sym] = np.nan
-            highest_high_map[sym] = np.nan
-            retraced_map[sym] = (False, None)
-            mfe_mae_map[sym] = (0.0, 0.0, 0.0, 0.0)
+            ll5_map[sym] = ll10_map[sym] = np.nan
+            hh5_map[sym] = hh10_map[sym] = np.nan
+            retraced5_map[sym] = retraced10_map[sym] = False
+            days5_map[sym] = days10_map[sym] = None
+            mfe_mae_5_map[sym] = mfe_mae_10_map[sym] = (0.0, 0.0, 0.0, 0.0)
 
     # 330-day SMA distance for all symbols
     sma_query = """
@@ -475,6 +502,8 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
 
     # Build results and CSV rows
     csv_rows = []
+    retraced_count_5 = 0
+    retraced_count_10 = 0
     for _, row in gap_ups.iterrows():
         symbol = row['symbol']
         gap_percent = row['gap_percent']
@@ -482,31 +511,44 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
         close_price = row['close']
 
         anchored_vwap = float(anchored_vwap_map.get(symbol, 0.0))
-        retraced, days_to_retrace = retraced_map.get(symbol, (False, None))
-        lowest_low = lowest_low_map.get(symbol, np.nan)
-        highest_high = highest_high_map.get(symbol, np.nan)
-        mfe_dollars, mae_dollars, mfe_percent, mae_percent = mfe_mae_map.get(symbol, (0.0, 0.0, 0.0, 0.0))
-
         sma_base = sma_330_map.get(symbol)
         sma_330_distance = ((close_price - sma_base) / sma_base) * 100 if sma_base and sma_base > 0 else None
 
-        if retraced:
-            retraced_count += 1
+        # 5d and 10d retracement info
+        retraced5 = retraced5_map.get(symbol, False)
+        days5 = days5_map.get(symbol)
+        retraced10 = retraced10_map.get(symbol, False)
+        days10 = days10_map.get(symbol)
 
-        # Retracement percentage: for gap-ups use lowest low; for gap-downs use highest high
+        if retraced5:
+            retraced_count_5 += 1
+        if retraced10:
+            retraced_count_10 += 1
+
+        # Retracement percentage for 5d and 10d
+        retrace_pct_5 = 0.0
+        retrace_pct_10 = 0.0
         if anchored_vwap > 0:
-            if gap_mode == 'up' and open_price > anchored_vwap and pd.notna(lowest_low):
-                max_possible_retrace = open_price - anchored_vwap
-                actual_retrace = open_price - float(lowest_low)
-                retrace_percentage = (actual_retrace / max_possible_retrace) * 100 if max_possible_retrace > 0 else 0.0
-            elif gap_mode == 'down' and open_price < anchored_vwap and pd.notna(highest_high):
-                max_possible_retrace = anchored_vwap - open_price
-                actual_retrace = float(highest_high) - open_price
-                retrace_percentage = (actual_retrace / max_possible_retrace) * 100 if max_possible_retrace > 0 else 0.0
-            else:
-                retrace_percentage = 0.0
-        else:
-            retrace_percentage = 0.0
+            if gap_mode == 'up' and open_price > anchored_vwap:
+                ll5 = ll5_map.get(symbol, np.nan)
+                ll10 = ll10_map.get(symbol, np.nan)
+                max_pos = open_price - anchored_vwap
+                if pd.notna(ll5) and max_pos > 0:
+                    retrace_pct_5 = (max(0.0, open_price - float(ll5)) / max_pos) * 100
+                if pd.notna(ll10) and max_pos > 0:
+                    retrace_pct_10 = (max(0.0, open_price - float(ll10)) / max_pos) * 100
+            elif gap_mode == 'down' and open_price < anchored_vwap:
+                hh5 = hh5_map.get(symbol, np.nan)
+                hh10 = hh10_map.get(symbol, np.nan)
+                max_pos = anchored_vwap - open_price
+                if pd.notna(hh5) and max_pos > 0:
+                    retrace_pct_5 = (max(0.0, float(hh5) - open_price) / max_pos) * 100
+                if pd.notna(hh10) and max_pos > 0:
+                    retrace_pct_10 = (max(0.0, float(hh10) - open_price) / max_pos) * 100
+
+        # MFE/MAE maps
+        mfe5, mae5, mfe5p, mae5p = mfe_mae_5_map.get(symbol, (0.0, 0.0, 0.0, 0.0))
+        mfe10, mae10, mfe10p, mae10p = mfe_mae_10_map.get(symbol, (0.0, 0.0, 0.0, 0.0))
 
         csv_rows.append({
             'ticker': symbol,
@@ -515,13 +557,20 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
             'open_price': round(open_price, 2),
             'close_price': round(close_price, 2),
             'anchored_vwap': round(anchored_vwap, 2),
-            'retraced_to_vwap': retraced,
-            'days_to_retrace': days_to_retrace if days_to_retrace is not None else '',
-            'retrace_percentage': round(retrace_percentage, 2),
-            'mfe_dollars': round(mfe_dollars, 2),
-            'mae_dollars': round(mae_dollars, 2),
-            'mfe_percent': round(mfe_percent, 2),
-            'mae_percent': round(mae_percent, 2),
+            'retraced_to_vwap_5d': retraced5,
+            'days_to_retrace_5d': days5 if days5 is not None else '',
+            'retrace_percentage_5d': round(retrace_pct_5, 2),
+            'mfe_dollars_5d': round(mfe5, 2),
+            'mae_dollars_5d': round(mae5, 2),
+            'mfe_percent_5d': round(mfe5p, 2),
+            'mae_percent_5d': round(mae5p, 2),
+            'retraced_to_vwap_10d': retraced10,
+            'days_to_retrace_10d': days10 if days10 is not None else '',
+            'retrace_percentage_10d': round(retrace_pct_10, 2),
+            'mfe_dollars_10d': round(mfe10, 2),
+            'mae_dollars_10d': round(mae10, 2),
+            'mfe_percent_10d': round(mfe10p, 2),
+            'mae_percent_10d': round(mae10p, 2),
             'sma_330_distance_percent': round(sma_330_distance, 2) if sma_330_distance is not None else '',
             'spy_daily_gain_percent': round(spy_daily_gain, 2) if spy_daily_gain is not None else ''
         })
@@ -532,13 +581,20 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
             'open_price': open_price,
             'close_price': close_price,
             'anchored_vwap': anchored_vwap,
-            'retraced_to_vwap': retraced,
-            'days_to_retrace': days_to_retrace,
-            'retrace_percentage': retrace_percentage,
-            'mfe_dollars': mfe_dollars,
-            'mae_dollars': mae_dollars,
-            'mfe_percent': mfe_percent,
-            'mae_percent': mae_percent,
+            'retraced_to_vwap_5d': retraced5,
+            'days_to_retrace_5d': days5,
+            'retrace_percentage_5d': retrace_pct_5,
+            'mfe_dollars_5d': mfe5,
+            'mae_dollars_5d': mae5,
+            'mfe_percent_5d': mfe5p,
+            'mae_percent_5d': mae5p,
+            'retraced_to_vwap': retraced10,
+            'days_to_retrace': days10,
+            'retrace_percentage': retrace_pct_10,
+            'mfe_dollars': mfe10,
+            'mae_dollars': mae10,
+            'mfe_percent': mfe10p,
+            'mae_percent': mae10p,
             'sma_330_distance_percent': sma_330_distance,
             'spy_daily_gain_percent': spy_daily_gain
         })
@@ -548,12 +604,15 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
         csv_writer.writerows(csv_rows)
     
     total_gap_ups = len(results)
-    retracement_rate = (retraced_count / total_gap_ups * 100) if total_gap_ups > 0 else 0
+    retracement_rate_5d = (retraced_count_5 / total_gap_ups * 100) if total_gap_ups > 0 else 0
+    retracement_rate = (retraced_count_10 / total_gap_ups * 100) if total_gap_ups > 0 else 0
     
     return {
         'date': date,
         'total_gap_ups': total_gap_ups,
-        'retraced_to_vwap': retraced_count,
+        'retraced_to_vwap_5d': retraced_count_5,
+        'retracement_rate_5d': retracement_rate_5d,
+        'retraced_to_vwap': retraced_count_10,
         'retracement_rate': retracement_rate,
         'details': results
     }
@@ -625,7 +684,12 @@ def main():
         logging.info(f"Writing detailed results to {csv_filename}")
         
         with open(csv_filename, 'w', newline='') as csvfile:
-            fieldnames = ['ticker', 'date', 'gap_up_percent', 'open_price', 'close_price', 'anchored_vwap', 'retraced_to_vwap', 'days_to_retrace', 'retrace_percentage', 'mfe_dollars', 'mae_dollars', 'mfe_percent', 'mae_percent', 'sma_330_distance_percent', 'spy_daily_gain_percent']
+            fieldnames = [
+                'ticker','date','gap_up_percent','open_price','close_price','anchored_vwap',
+                'retraced_to_vwap_5d','days_to_retrace_5d','retrace_percentage_5d','mfe_dollars_5d','mae_dollars_5d','mfe_percent_5d','mae_percent_5d',
+                'retraced_to_vwap_10d','days_to_retrace_10d','retrace_percentage_10d','mfe_dollars_10d','mae_dollars_10d','mfe_percent_10d','mae_percent_10d',
+                'sma_330_distance_percent','spy_daily_gain_percent'
+            ]
             csv_writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             csv_writer.writeheader()
             
@@ -637,35 +701,40 @@ def main():
                 # Print summary for this date
                 print(f"Date: {result['date']}")
                 print(f"Total gap-{args.gap_mode}s (>=5%): {result['total_gap_ups']}")
-                print(f"Retraced to VWAP: {result['retraced_to_vwap']}")
-                print(f"Retracement rate: {result['retracement_rate']:.1f}%")
+                print(f"Retraced to VWAP (5d): {result['retraced_to_vwap_5d']}  rate: {result['retracement_rate_5d']:.1f}%")
+                print(f"Retraced to VWAP (10d): {result['retraced_to_vwap']}  rate: {result['retracement_rate']:.1f}%")
                 
                 # Print top gap-ups for this date
                 if result['details']:
                     print(f"\nTop gap-{args.gap_mode}s:")
                     for detail in sorted(result['details'], key=lambda x: x['gap_percent'], reverse=True)[:5]:
-                        retraced_text = "✓" if detail['retraced_to_vwap'] else "✗"
-                        days_text = f" ({detail['days_to_retrace']} days)" if detail['days_to_retrace'] is not None else ""
-                        print(f"  {detail['symbol']}: {detail['gap_percent']:.1f}% gap, "
-                              f"Anchored VWAP: ${detail['anchored_vwap']:.2f}, "
-                              f"Retraced: {retraced_text}{days_text}, "
-                              f"Retrace %: {detail['retrace_percentage']:.1f}%, "
-                              f"MFE: ${detail['mfe_dollars']:.2f} ({detail['mfe_percent']:.1f}%), "
-                              f"MAE: ${detail['mae_dollars']:.2f} ({detail['mae_percent']:.1f}%)")
+                        r5 = "✓" if detail['retraced_to_vwap_5d'] else "✗"
+                        d5 = f" ({detail['days_to_retrace_5d']}d)" if detail['days_to_retrace_5d'] is not None else ""
+                        r10 = "✓" if detail['retraced_to_vwap'] else "✗"
+                        d10 = f" ({detail['days_to_retrace']}d)" if detail['days_to_retrace'] is not None else ""
+                        print(f"  {detail['symbol']}: {detail['gap_percent']:.1f}% gap, AVWAP ${detail['anchored_vwap']:.2f}, "
+                              f"5d: {r5}{d5}, {detail['retrace_percentage_5d']:.1f}% | "
+                              f"10d: {r10}{d10}, {detail['retrace_percentage']:.1f}%, "
+                              f"MFE 5d: ${detail['mfe_dollars_5d']:.2f} ({detail['mfe_percent_5d']:.1f}%), "
+                              f"MAE 5d: ${detail['mae_dollars_5d']:.2f} ({detail['mae_percent_5d']:.1f}%), "
+                              f"MFE 10d: ${detail['mfe_dollars']:.2f} ({detail['mfe_percent']:.1f}%), "
+                              f"MAE 10d: ${detail['mae_dollars']:.2f} ({detail['mae_percent']:.1f}%)")
                 
                 print("-" * 40)
         
         # Overall summary
         total_gap_ups = sum(r['total_gap_ups'] for r in all_results)
-        total_retraced = sum(r['retraced_to_vwap'] for r in all_results)
-        overall_rate = (total_retraced / total_gap_ups * 100) if total_gap_ups > 0 else 0
+        total_retraced_5d = sum(r.get('retraced_to_vwap_5d', 0) for r in all_results)
+        total_retraced_10d = sum(r['retraced_to_vwap'] for r in all_results)
+        overall_rate_5d = (total_retraced_5d / total_gap_ups * 100) if total_gap_ups > 0 else 0
+        overall_rate_10d = (total_retraced_10d / total_gap_ups * 100) if total_gap_ups > 0 else 0
         
         print("\n" + "=" * 80)
         print("OVERALL SUMMARY")
         print("=" * 80)
         print(f"Total gap-{args.gap_mode}s analyzed: {total_gap_ups}")
-        print(f"Total that retraced to VWAP: {total_retraced}")
-        print(f"Overall retracement rate: {overall_rate:.1f}%")
+        print(f"Total that retraced to VWAP (5d): {total_retraced_5d}  rate: {overall_rate_5d:.1f}%")
+        print(f"Total that retraced to VWAP (10d): {total_retraced_10d}  rate: {overall_rate_10d:.1f}%")
         print(f"\nDetailed results saved to: {csv_filename}")
         
     except Exception as e:
