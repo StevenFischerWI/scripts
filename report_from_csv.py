@@ -164,7 +164,13 @@ def build_report(csv_path: str, out_path: str) -> None:
     sort_col = 'mfe_percent_10d' if 'mfe_percent_10d' in df.columns else ('mfe_percent' if 'mfe_percent' in df.columns else None)
     top_cols = [c for c in ['ticker', 'date', 'gap_up_percent', 'mfe_percent_10d', 'mae_percent_10d', 'retrace_percentage_10d'] if c in df.columns]
     if sort_col and not df.empty:
-        top = df[top_cols].sort_values(by=sort_col, ascending=False).head(20)
+        present_cols = [c for c in top_cols if c in df.columns]
+        df_sorted = df.sort_values(by=sort_col, ascending=False)
+        if present_cols:
+            top = df_sorted[present_cols].head(20)
+        else:
+            fallback_cols = [c for c in ['ticker', 'date', 'gap_up_percent'] if c in df_sorted.columns]
+            top = df_sorted[fallback_cols].head(20) if fallback_cols else df_sorted.head(20)
         top_html = top.to_html(index=False)
     else:
         top_html = pd.DataFrame(columns=['No data']).to_html(index=False)
