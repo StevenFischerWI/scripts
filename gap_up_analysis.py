@@ -66,10 +66,22 @@ def find_gap_ups(conn, date: str, gap_threshold: float = 0.05) -> pd.DataFrame:
         c.low,
         c.close,
         c.date,
-        COALESCE(c.volume, 0) as volume,
-        prev.close as prev_close,
-        (c.open - prev.close) / prev.close as gap_percent
-    FROM candle c
+        c.volume,
+        prev.close AS prev_close,
+        (c.open - prev.close) / prev.close AS gap_percent
+    FROM (
+        SELECT DISTINCT ON (symbol, date)
+            symbol,
+            open,
+            high,
+            low,
+            close,
+            date,
+            COALESCE(volume, 0) AS volume
+        FROM candle
+        WHERE date = %s
+        ORDER BY symbol, date, COALESCE(volume, 0) DESC
+    ) c
     JOIN LATERAL (
         SELECT close
         FROM candle p
@@ -77,12 +89,12 @@ def find_gap_ups(conn, date: str, gap_threshold: float = 0.05) -> pd.DataFrame:
         ORDER BY p.date DESC
         LIMIT 1
     ) prev ON TRUE
-    WHERE c.date = %s
-    AND (c.open - prev.close) / prev.close >= %s
+    WHERE (c.open - prev.close) / prev.close >= %s
     ORDER BY gap_percent DESC;
     """
     
     df = pd.read_sql_query(query, conn, params=(date, date, gap_threshold))
+    df = df.drop_duplicates(subset=['symbol', 'date'], keep='first')
     logging.debug(f"Found {len(df)} gap-ups for {date}")
     return df
 
@@ -278,12 +290,18 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer) -> Dict:
 
     # Anchored VWAP from 3 days before through gap day for all symbols
     vwap_query = """
-    SELECT symbol, date, high, low, close, COALESCE(volume, 0) AS volume
-    FROM candle
-    WHERE date BETWEEN %s AND %s
-      AND symbol = ANY(%s)
+    SELECT symbol, date, high, low, close, volume
+    FROM (
+        SELECT DISTINCT ON (symbol, date)
+            symbol, date, high, low, close, COALESCE(volume, 0) AS volume
+        FROM candle
+        WHERE date BETWEEN %s AND %s
+          AND symbol = ANY(%s)
+        ORDER BY symbol, date, COALESCE(volume, 0) DESC
+    ) d
     """
     vwap_df = pd.read_sql_query(vwap_query, conn, params=(start_date, date, symbols))
+    vwap_df = vwap_df.drop_duplicates(subset=['symbol', 'date'], keep='first')
     anchored_vwap_map = {}
     if not vwap_df.empty:
         vwap_df['typical'] = (vwap_df['high'] + vwap_df['low'] + vwap_df['close']) / 3
@@ -299,12 +317,18 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer) -> Dict:
     # 10-day window after the gap day for retracement and MFE/MAE
     post_query = """
     SELECT symbol, date, high, low
-    FROM candle
-    WHERE date > %s AND date <= %s
-      AND symbol = ANY(%s)
+    FROM (
+        SELECT DISTINCT ON (symbol, date)
+            symbol, date, high, low, COALESCE(volume, 0) AS volume
+        FROM candle
+        WHERE date > %s AND date <= %s
+          AND symbol = ANY(%s)
+        ORDER BY symbol, date, COALESCE(volume, 0) DESC
+    ) d
     ORDER BY symbol, date
     """
     post_df = pd.read_sql_query(post_query, conn, params=(date, end_date_10, symbols))
+    post_df = post_df.drop_duplicates(subset=['symbol', 'date'], keep='first')
     post_df['date'] = pd.to_datetime(post_df['date']) if not post_df.empty else post_df
 
     # Gap day prices mapped by symbol
@@ -354,8 +378,13 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer) -> Dict:
     FROM (
         SELECT symbol, close, date,
                ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
-        FROM candle
-        WHERE symbol = ANY(%s) AND date <= %s
+        FROM (
+            SELECT DISTINCT ON (symbol, date)
+                symbol, close, date
+            FROM candle
+            WHERE symbol = ANY(%s) AND date <= %s
+            ORDER BY symbol, date DESC
+        ) d
     ) t
     WHERE rn <= 330
     """
