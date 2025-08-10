@@ -353,24 +353,44 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_daily_5 = px.scatter(title='No monthly data')
         fig_daily_10 = px.scatter(title='No monthly data')
 
-    # Monthly win rate charts (5d and 10d)
+    # Monthly win rate charts (5d and 10d) - changed to line charts with 14-period MA
     if 'date' in df.columns and not df['date'].isna().all():
         df_m = df.copy()
         df_m['month'] = df_m['date'].dt.to_period('M').dt.to_timestamp()
         monthly_5 = None
         monthly_10 = None
+        
+        import plotly.graph_objects as go
+        
         if retraced5_col:
             df_m['retr5_num'] = pd.to_numeric(df_m[retraced5_col], errors='coerce').fillna(0).astype(float)
             monthly_5 = (df_m.groupby('month', dropna=True)['retr5_num'].mean().reset_index(name='rate'))
             monthly_5['rate'] = 100 * monthly_5['rate']
-            fig_monthly_5 = px.bar(monthly_5, x='month', y='rate', title='Monthly 5d win rate (%)')
+            monthly_5['ma14'] = monthly_5['rate'].rolling(window=14, min_periods=1).mean()
+            
+            fig_monthly_5 = go.Figure()
+            fig_monthly_5.add_trace(go.Scatter(x=monthly_5['month'], y=monthly_5['rate'], mode='lines', 
+                                              name='Monthly 5d win rate', line=dict(color='blue')))
+            fig_monthly_5.add_trace(go.Scatter(x=monthly_5['month'], y=monthly_5['ma14'], mode='lines', 
+                                              name='14-period MA', line=dict(color='red', width=2)))
+            fig_monthly_5.update_layout(title='Monthly 5d win rate (%) with 14-period MA', 
+                                       xaxis_title='Month', yaxis_title='Rate (%)')
         else:
             fig_monthly_5 = px.scatter(title='Monthly 5d win rate (n/a)')
+            
         if retraced10_col:
             df_m['retr10_num'] = pd.to_numeric(df_m[retraced10_col], errors='coerce').fillna(0).astype(float)
             monthly_10 = (df_m.groupby('month', dropna=True)['retr10_num'].mean().reset_index(name='rate'))
             monthly_10['rate'] = 100 * monthly_10['rate']
-            fig_monthly_10 = px.bar(monthly_10, x='month', y='rate', title='Monthly 10d win rate (%)')
+            monthly_10['ma14'] = monthly_10['rate'].rolling(window=14, min_periods=1).mean()
+            
+            fig_monthly_10 = go.Figure()
+            fig_monthly_10.add_trace(go.Scatter(x=monthly_10['month'], y=monthly_10['rate'], mode='lines', 
+                                               name='Monthly 10d win rate', line=dict(color='blue')))
+            fig_monthly_10.add_trace(go.Scatter(x=monthly_10['month'], y=monthly_10['ma14'], mode='lines', 
+                                               name='14-period MA', line=dict(color='red', width=2)))
+            fig_monthly_10.update_layout(title='Monthly 10d win rate (%) with 14-period MA', 
+                                        xaxis_title='Month', yaxis_title='Rate (%)')
         else:
             fig_monthly_10 = px.scatter(title='Monthly 10d win rate (n/a)')
 
