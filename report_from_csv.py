@@ -33,6 +33,12 @@ TEMPLATE = """<!doctype html>
   <p class="meta">Rows: {{ nrows }}, Dates: {{ ndates }}, Direction: {{ direction }}</p>
 
   <div class="section">
+    <h2>Performance summary</h2>
+    <p>Overall win rate: {{ overall_win_rate }}% &nbsp;|&nbsp; Profit factor: {{ overall_profit_factor }}</p>
+    {{ perf_table|safe }}
+  </div>
+
+  <div class="section">
     <h2>Daily retracement rates</h2>
     {{ fig_daily_5|safe }}
     {{ fig_daily_10|safe }}
@@ -111,6 +117,52 @@ def build_report(csv_path: str, out_path: str) -> None:
     else:
         daily = pd.DataFrame(columns=['date', 'total', 'retraced5', 'retraced10', 'rate5', 'rate10'])
 
+    # Performance summary (overall and by year)
+    # Define columns to use
+    win_col = retraced10_col
+    retrace_pct_col = 'retrace_percentage_10d' if 'retrace_percentage_10d' in df.columns else ('retrace_percentage' if 'retrace_percentage' in df.columns else None)
+
+    if retrace_pct_col:
+        df['retrace_frac_10d'] = pd.to_numeric(df[retrace_pct_col], errors='coerce') / 100.0
+        df['retrace_frac_10d'] = df['retrace_frac_10d'].clip(lower=0.0, upper=1.0).fillna(0.0)
+        profit_units_total = float(df['retrace_frac_10d'].sum())
+        loss_units_total = float((1.0 - df['retrace_frac_10d']).sum())
+        overall_profit_factor = ("∞" if profit_units_total > 0 and loss_units_total == 0
+                                 else (f"{(profit_units_total / loss_units_total):.2f}" if loss_units_total > 0 else "0.00"))
+    else:
+        df['retrace_frac_10d'] = np.nan
+        overall_profit_factor = "n/a"
+
+    if win_col and win_col in df.columns and len(df) > 0:
+        overall_win_rate = f"{(100.0 * pd.to_numeric(df[win_col], errors='coerce').fillna(0).astype(float).mean()):.2f}"
+    else:
+        overall_win_rate = "n/a"
+
+    # Yearly segmentation
+    if 'date' in df.columns and not df['date'].isna().all():
+        df_year = df.copy()
+        df_year['year'] = df_year['date'].dt.year
+        perf_rows = []
+        for y, g in df_year.groupby('year', dropna=True):
+            trades = int(len(g))
+            if win_col and win_col in g.columns and trades > 0:
+                wr = 100.0 * pd.to_numeric(g[win_col], errors='coerce').fillna(0).astype(float).mean()
+            else:
+                wr = np.nan
+            if 'retrace_frac_10d' in g.columns and not g['retrace_frac_10d'].isna().all():
+                p = float(g['retrace_frac_10d'].sum())
+                l = float((1.0 - g['retrace_frac_10d']).sum())
+                pf = np.inf if p > 0 and l == 0 else (p / l if l > 0 else np.nan)
+            else:
+                pf = np.nan
+            perf_rows.append({'Year': int(y), 'Trades': trades, 'Win Rate %': round(wr, 2) if pd.notna(wr) else np.nan,
+                              'Profit Factor': (round(pf, 2) if np.isfinite(pf) else (np.nan if np.isnan(pf) else np.inf))})
+        perf_df = pd.DataFrame(perf_rows).sort_values('Year') if perf_rows else pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor'])
+        # Render table with reasonable formatting
+        perf_table_html = perf_df.to_html(index=False)
+    else:
+        perf_table_html = pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor']).to_html(index=False)
+
     # Charts
     fig_daily_5 = px.line(daily, x='date', y='rate5', title='Daily 5d retracement rate (%)') if not daily.empty else px.scatter(title='No daily data')
     fig_daily_10 = px.line(daily, x='date', y='rate10', title='Daily 10d retracement rate (%)') if not daily.empty else px.scatter(title='No daily data')
@@ -180,6 +232,9 @@ def build_report(csv_path: str, out_path: str) -> None:
         nrows=len(df),
         ndates=df['date'].nunique() if 'date' in df.columns else 'n/a',
         direction=direction,
+        overall_win_rate=overall_win_rate,
+        overall_profit_factor=overall_profit_factor,
+        perf_table=perf_table_html,
         fig_daily_5=fig_daily_5.to_html(include_plotlyjs='cdn', full_html=False),
         fig_daily_10=fig_daily_10.to_html(include_plotlyjs=False, full_html=False),
         fig_gap_hist=fig_gap_hist.to_html(include_plotlyjs=False, full_html=False),
