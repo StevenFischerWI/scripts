@@ -517,7 +517,7 @@ def build_report(csv_path: str, out_path: str) -> None:
     # Assumptions:
     # - Entry at open_price on gap day
     # - Exit when/if AVWAP is reached within horizon, otherwise best favorable extreme within horizon
-    # - Expected P&L uses retrace_percentage_*d (clipped to 100%) times distance to AVWAP
+    # - Expected P&L uses symmetric model: shares * distance * (2 * retrace_fraction - 1), capped to [-600, 1200] per trade
     if all(col in df.columns for col in ['anchored_vwap', 'open_price']) and (('retrace_percentage_5d' in df.columns) or ('retrace_percentage_10d' in df.columns or 'retrace_percentage' in df.columns)):
         dfp = df.copy()
         dfp['open_price'] = pd.to_numeric(dfp['open_price'], errors='coerce')
@@ -527,14 +527,16 @@ def build_report(csv_path: str, out_path: str) -> None:
 
         if 'retrace_percentage_5d' in dfp.columns:
             f5 = pd.to_numeric(dfp['retrace_percentage_5d'], errors='coerce') / 100.0
-            dfp['pnl_5'] = dfp['shares'] * dfp['distance'] * f5.clip(lower=0.0, upper=1.0)
+            raw_pnl_5 = dfp['shares'] * dfp['distance'] * (2.0 * f5.clip(lower=0.0, upper=1.0) - 1.0)
+            dfp['pnl_5'] = raw_pnl_5.clip(lower=-600.0, upper=1200.0)
         else:
             dfp['pnl_5'] = np.nan
 
         r10_col = 'retrace_percentage_10d' if 'retrace_percentage_10d' in dfp.columns else ('retrace_percentage' if 'retrace_percentage' in dfp.columns else None)
         if r10_col:
             f10 = pd.to_numeric(dfp[r10_col], errors='coerce') / 100.0
-            dfp['pnl_10'] = dfp['shares'] * dfp['distance'] * f10.clip(lower=0.0, upper=1.0)
+            raw_pnl_10 = dfp['shares'] * dfp['distance'] * (2.0 * f10.clip(lower=0.0, upper=1.0) - 1.0)
+            dfp['pnl_10'] = raw_pnl_10.clip(lower=-600.0, upper=1200.0)
         else:
             dfp['pnl_10'] = np.nan
 
