@@ -60,6 +60,7 @@ TEMPLATE = """<!doctype html>
   <div class="section" id="performance">
     <h2>Performance summary</h2>
     <p>Overall win rate: {{ overall_win_rate }}% &nbsp;|&nbsp; Profit factor: {{ overall_profit_factor }}</p>
+    <p>Gap closure rate: 5d: {{ gap_close_rate_5d }}% &nbsp;|&nbsp; 10d: {{ gap_close_rate_10d }}%</p>
     <h3>5-day performance by year</h3>
     {{ perf_table_5|safe }}
     <h3>10-day performance by year</h3>
@@ -223,6 +224,16 @@ def build_report(csv_path: str, out_path: str) -> None:
     win_col_5 = retraced5_col
     retrace_pct_10_col = 'retrace_percentage_10d' if 'retrace_percentage_10d' in df.columns else ('retrace_percentage' if 'retrace_percentage' in df.columns else None)
     retrace_pct_5_col = 'retrace_percentage_5d' if 'retrace_percentage_5d' in df.columns else None
+
+    # Calculate gap closure metrics
+    gap_close_rate_5d = "n/a"
+    gap_close_rate_10d = "n/a"
+    if retrace_pct_5_col and retrace_pct_5_col in df.columns and len(df) > 0:
+        df['gap_closed_5d'] = pd.to_numeric(df[retrace_pct_5_col], errors='coerce') >= 100
+        gap_close_rate_5d = f"{(100.0 * df['gap_closed_5d'].mean()):.2f}"
+    if retrace_pct_10_col and retrace_pct_10_col in df.columns and len(df) > 0:
+        df['gap_closed_10d'] = pd.to_numeric(df[retrace_pct_10_col], errors='coerce') >= 100
+        gap_close_rate_10d = f"{(100.0 * df['gap_closed_10d'].mean()):.2f}"
 
     # Build fractional retrace columns for PF computation
     if retrace_pct_10_col:
@@ -690,6 +701,8 @@ def build_report(csv_path: str, out_path: str) -> None:
         direction=direction,
         overall_win_rate=overall_win_rate,
         overall_profit_factor=overall_profit_factor,
+        gap_close_rate_5d=gap_close_rate_5d,
+        gap_close_rate_10d=gap_close_rate_10d,
         perf_table_5=perf_table_5_html,
         perf_table_10=perf_table_10_html,
         fig_daily_5=fig_daily_5.to_html(include_plotlyjs='cdn', full_html=False),
