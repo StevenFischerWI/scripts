@@ -10,6 +10,7 @@ Dependencies:
 """
 import argparse
 import pandas as pd
+from pandas.errors import EmptyDataError
 import numpy as np
 import plotly.express as px
 from jinja2 import Template
@@ -76,7 +77,24 @@ TEMPLATE = """<!doctype html>
 
 
 def build_report(csv_path: str, out_path: str) -> None:
-    df = pd.read_csv(csv_path)
+    try:
+        df = pd.read_csv(csv_path)
+    except EmptyDataError:
+        html = f"""<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Gap report</title>
+<style>body{{font-family:system-ui,Segoe UI,Arial;margin:16px;line-height:1.4}}</style>
+</head>
+<body>
+  <h1>Gap report</h1>
+  <p>No data found in CSV file: <code>{csv_path}</code></p>
+  <p>Please run the analysis to generate a non-empty CSV and try again.</p>
+</body>
+</html>"""
+        with open(out_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+        print(f"Wrote {out_path}")
+        return
 
     # Infer direction from filename; fallback to unknown
     direction = 'long' if 'long' in csv_path.lower() else ('short' if 'short' in csv_path.lower() else 'unknown')
