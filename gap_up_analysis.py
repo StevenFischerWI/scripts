@@ -410,17 +410,22 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
     retraced_map = {}
     mfe_mae_map = {}
     lowest_low_map = {}
+    highest_high_map = {}
     if not post_df.empty:
         for sym, g in post_df.groupby('symbol'):
             lowest_low = g['low'].min()
             highest_high = g['high'].max()
             lowest_low_map[sym] = lowest_low
+            highest_high_map[sym] = highest_high
 
             avwap = anchored_vwap_map.get(sym, np.nan)
             retraced = False
             days_to_retrace = None
             if pd.notna(avwap):
-                hit = g[g['low'] <= avwap]
+                if gap_mode == 'up':
+                    hit = g[g['low'] <= avwap]
+                else:
+                    hit = g[g['high'] >= avwap]
                 if not hit.empty:
                     retraced = True
                     first_hit_date = hit['date'].iloc[0]
@@ -440,6 +445,7 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
     else:
         for sym in symbols:
             lowest_low_map[sym] = np.nan
+            highest_high_map[sym] = np.nan
             retraced_map[sym] = (False, None)
             mfe_mae_map[sym] = (0.0, 0.0, 0.0, 0.0)
 
@@ -478,6 +484,7 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
         anchored_vwap = float(anchored_vwap_map.get(symbol, 0.0))
         retraced, days_to_retrace = retraced_map.get(symbol, (False, None))
         lowest_low = lowest_low_map.get(symbol, np.nan)
+        highest_high = highest_high_map.get(symbol, np.nan)
         mfe_dollars, mae_dollars, mfe_percent, mae_percent = mfe_mae_map.get(symbol, (0.0, 0.0, 0.0, 0.0))
 
         sma_base = sma_330_map.get(symbol)
@@ -486,11 +493,18 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
         if retraced:
             retraced_count += 1
 
-        # Retracement percentage using lowest low in the 10-day window
-        if anchored_vwap > 0 and open_price > anchored_vwap and pd.notna(lowest_low):
-            max_possible_retrace = open_price - anchored_vwap
-            actual_retrace = open_price - float(lowest_low)
-            retrace_percentage = (actual_retrace / max_possible_retrace) * 100 if max_possible_retrace > 0 else 0.0
+        # Retracement percentage: for gap-ups use lowest low; for gap-downs use highest high
+        if anchored_vwap > 0:
+            if gap_mode == 'up' and open_price > anchored_vwap and pd.notna(lowest_low):
+                max_possible_retrace = open_price - anchored_vwap
+                actual_retrace = open_price - float(lowest_low)
+                retrace_percentage = (actual_retrace / max_possible_retrace) * 100 if max_possible_retrace > 0 else 0.0
+            elif gap_mode == 'down' and open_price < anchored_vwap and pd.notna(highest_high):
+                max_possible_retrace = anchored_vwap - open_price
+                actual_retrace = float(highest_high) - open_price
+                retrace_percentage = (actual_retrace / max_possible_retrace) * 100 if max_possible_retrace > 0 else 0.0
+            else:
+                retrace_percentage = 0.0
         else:
             retrace_percentage = 0.0
 
