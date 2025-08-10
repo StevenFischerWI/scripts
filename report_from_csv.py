@@ -128,7 +128,7 @@ def build_report(csv_path: str, out_path: str) -> None:
         dfb = df.copy()
         dfb['gap_bucket'] = pd.cut(dfb['gap_up_percent'], bins=bins, labels=labels, right=False)
         bucket = (dfb.dropna(subset=['gap_bucket'])
-                    .groupby('gap_bucket')
+                    .groupby('gap_bucket', observed=False)
                     .agg(total=('ticker', 'count'),
                          retraced10=(retraced10_col, 'mean'))
                     .reset_index())
