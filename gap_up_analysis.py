@@ -90,11 +90,11 @@ def find_gap_ups(conn, date: str, gap_threshold: float = 0.05, gap_mode: str = '
             ORDER BY p.date DESC
             LIMIT 1
         ) prev ON TRUE
-        WHERE prev.close >= %s
+        WHERE prev.close BETWEEN %s AND %s
           AND (c.open - prev.close) / prev.close >= %s
         ORDER BY gap_percent DESC;
         """
-        params = (date, date, 20.0, gap_threshold)
+        params = (date, date, 20.0, 1000.0, gap_threshold)
     else:
         query = """
         SELECT
@@ -127,11 +127,11 @@ def find_gap_ups(conn, date: str, gap_threshold: float = 0.05, gap_mode: str = '
             ORDER BY p.date DESC
             LIMIT 1
         ) prev ON TRUE
-        WHERE prev.close >= %s
+        WHERE prev.close BETWEEN %s AND %s
           AND (prev.close - c.open) / prev.close >= %s
         ORDER BY gap_percent DESC;
         """
-        params = (date, date, 20.0, gap_threshold)
+        params = (date, date, 20.0, 1000.0, gap_threshold)
     
     df = pd.read_sql_query(query, conn, params=params)
     df = df.drop_duplicates(subset=['symbol', 'date'], keep='first')
