@@ -52,7 +52,7 @@ def calculate_vwap(df: pd.DataFrame) -> float:
     
     return vwap
 
-def find_gap_ups(conn, date: str, gap_threshold: float = 0.03) -> pd.DataFrame:
+def find_gap_ups(conn, date: str, gap_threshold: float = 0.05) -> pd.DataFrame:
     """
     Find all gap-ups over the threshold for a given date.
     Gap-up = (open - previous_close) / previous_close > threshold
@@ -97,7 +97,7 @@ def find_gap_ups(conn, date: str, gap_threshold: float = 0.03) -> pd.DataFrame:
         FROM candle 
         WHERE symbol = c.symbol AND date < %s
     )
-    AND (c.open - p.prev_close) / p.prev_close > %s
+    AND (c.open - p.prev_close) / p.prev_close >= %s
     ORDER BY gap_percent DESC;
     """
     
@@ -437,7 +437,7 @@ def main():
                 
                 # Print summary for this date
                 print(f"Date: {result['date']}")
-                print(f"Total gap-ups (>3%): {result['total_gap_ups']}")
+                print(f"Total gap-ups (>=5%): {result['total_gap_ups']}")
                 print(f"Retraced to VWAP: {result['retraced_to_vwap']}")
                 print(f"Retracement rate: {result['retracement_rate']:.1f}%")
                 
