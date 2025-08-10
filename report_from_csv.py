@@ -93,6 +93,12 @@ TEMPLATE = """<!doctype html>
   </div>
 
   <div class="section">
+    <h2>Win rate vs SPY daily change</h2>
+    {{ fig_spy_bucket_5|safe }}
+    {{ fig_spy_bucket_10|safe }}
+  </div>
+
+  <div class="section">
     <h2>Gap size vs 10d retrace %</h2>
     {{ fig_scatter|safe }}
   </div>
@@ -472,6 +478,35 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_sma330_bucket_5 = px.scatter(title='Win rate vs distance to 330-SMA (5d) — no data')
         fig_sma330_bucket_10 = px.scatter(title='Win rate vs distance to 330-SMA (10d) — no data')
 
+    # Win rate vs SPY daily change (5d and 10d)
+    if 'spy_daily_gain_percent' in df.columns and (retraced5_col or retraced10_col):
+        dfs = df.copy()
+        dfs['spy_pct'] = pd.to_numeric(dfs['spy_daily_gain_percent'], errors='coerce')
+        spy_bins = [-5, -3, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 5]
+        spy_labels = ['<-3', '-3–-2', '-2–-1', '-1–-0.5', '-0.5–0', '0–0.5', '0.5–1', '1–2', '2–3', '>3']
+        dfs['spy_bucket'] = pd.cut(dfs['spy_pct'], bins=spy_bins, labels=spy_labels, right=False)
+        if retraced5_col:
+            dfs['win5'] = pd.to_numeric(dfs[retraced5_col], errors='coerce').fillna(0).astype(float)
+        if retraced10_col:
+            dfs['win10'] = pd.to_numeric(dfs[retraced10_col], errors='coerce').fillna(0).astype(float)
+        gs = dfs.dropna(subset=['spy_bucket']).groupby('spy_bucket', observed=False)
+        if retraced5_col:
+            spy_win_5 = gs['win5'].mean().reset_index(name='rate')
+            spy_win_5['rate'] = 100 * spy_win_5['rate']
+            fig_spy_bucket_5 = px.bar(spy_win_5, x='spy_bucket', y='rate', title='Win rate vs SPY daily change (5d, %)')
+        else:
+            fig_spy_bucket_5 = px.scatter(title='Win rate vs SPY daily change (5d unavailable)')
+        if retraced10_col:
+            spy_win_10 = gs['win10'].mean().reset_index(name='rate')
+            spy_win_10['rate'] = 100 * spy_win_10['rate']
+            fig_spy_bucket_10 = px.bar(spy_win_10, x='spy_bucket', y='rate', title='Win rate vs SPY daily change (10d, %)')
+        else:
+            fig_spy_bucket_10 = px.scatter(title='Win rate vs SPY daily change (10d unavailable)')
+    else:
+        import plotly.graph_objects as go
+        fig_spy_bucket_5 = px.scatter(title='Win rate vs SPY daily change (5d) — no data')
+        fig_spy_bucket_10 = px.scatter(title='Win rate vs SPY daily change (10d) — no data')
+
     # Gap vs retrace scatter (10d)
     ycol = 'retrace_percentage_10d' if 'retrace_percentage_10d' in df.columns else None
     color_col = retraced10_col
@@ -533,6 +568,8 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_sma330_above_below=fig_sma330_above_below.to_html(include_plotlyjs=False, full_html=False),
         fig_sma330_bucket_5=fig_sma330_bucket_5.to_html(include_plotlyjs=False, full_html=False),
         fig_sma330_bucket_10=fig_sma330_bucket_10.to_html(include_plotlyjs=False, full_html=False),
+        fig_spy_bucket_5=fig_spy_bucket_5.to_html(include_plotlyjs=False, full_html=False),
+        fig_spy_bucket_10=fig_spy_bucket_10.to_html(include_plotlyjs=False, full_html=False),
         fig_scatter=fig_scatter.to_html(include_plotlyjs=False, full_html=False),
         fig_spy=fig_spy.to_html(include_plotlyjs=False, full_html=False),
         top_mfe=top_html
