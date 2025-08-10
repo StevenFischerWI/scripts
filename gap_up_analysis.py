@@ -89,11 +89,12 @@ def find_gap_ups(conn, date: str, gap_threshold: float = 0.05) -> pd.DataFrame:
         ORDER BY p.date DESC
         LIMIT 1
     ) prev ON TRUE
-    WHERE (c.open - prev.close) / prev.close >= %s
+    WHERE prev.close >= %s
+      AND (c.open - prev.close) / prev.close >= %s
     ORDER BY gap_percent DESC;
     """
     
-    df = pd.read_sql_query(query, conn, params=(date, date, gap_threshold))
+    df = pd.read_sql_query(query, conn, params=(date, date, 20.0, gap_threshold))
     df = df.drop_duplicates(subset=['symbol', 'date'], keep='first')
     logging.debug(f"Found {len(df)} gap-ups for {date}")
     return df
