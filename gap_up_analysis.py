@@ -315,6 +315,23 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer) -> Dict:
         agg['anchored_vwap'] = np.where(agg['vol'] > 0, agg['tpv'] / agg['vol'], agg['typical_mean'])
         anchored_vwap_map = dict(zip(agg['symbol'], agg['anchored_vwap']))
 
+    # Filter gap-ups by "room to AVWAP" >= 2% of prior close (requires prev_close)
+    if not gap_ups.empty:
+        avwap_series = gap_ups['symbol'].map(anchored_vwap_map)
+        room = gap_ups['open'] - avwap_series.astype(float)
+        threshold = 0.02 * gap_ups['prev_close']
+        gap_ups = gap_ups[avwap_series.notna() & (room >= threshold)].reset_index(drop=True)
+        symbols = gap_ups['symbol'].tolist()
+        if gap_ups.empty:
+            logging.info(f"No gap-ups meet AVWAP room >= 2% of prior close for {date}")
+            return {
+                'date': date,
+                'total_gap_ups': 0,
+                'retraced_to_vwap': 0,
+                'retracement_rate': 0.0,
+                'details': []
+            }
+
     # 10-day window after the gap day for retracement and MFE/MAE
     post_query = """
     SELECT symbol, date, high, low
