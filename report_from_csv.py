@@ -43,7 +43,7 @@ TEMPLATE = """<!doctype html>
   </div>
 
   <div class="section">
-    <h2>Weekly retracement rates</h2>
+    <h2>Monthly retracement rates</h2>
     {{ fig_daily_5|safe }}
     {{ fig_daily_10|safe }}
   </div>
@@ -163,12 +163,12 @@ def build_report(csv_path: str, out_path: str) -> None:
     retraced5_col = 'retraced_to_vwap_5d' if 'retraced_to_vwap_5d' in df.columns else None
     retraced10_col = 'retraced_to_vwap_10d' if 'retraced_to_vwap_10d' in df.columns else ('retraced_to_vwap' if 'retraced_to_vwap' in df.columns else None)
 
-    # Weekly summary (changed from daily)
+    # Monthly summary (changed from weekly)
     grp = None
     if 'date' in df.columns:
-        df_weekly = df.copy()
-        df_weekly['week'] = df_weekly['date'].dt.to_period('W').dt.start_time
-        grp = df_weekly.groupby('week')
+        df_monthly = df.copy()
+        df_monthly['month'] = df_monthly['date'].dt.to_period('M').dt.start_time
+        grp = df_monthly.groupby('month')
     
     if grp is not None:
         # Use named aggregation with output column names
@@ -177,21 +177,21 @@ def build_report(csv_path: str, out_path: str) -> None:
             agg_kwargs['retraced5'] = (retraced5_col, 'sum')
         if retraced10_col:
             agg_kwargs['retraced10'] = (retraced10_col, 'sum')
-        weekly = grp.agg(**agg_kwargs).reset_index()
-        if 'retraced5' in weekly.columns:
-            weekly['rate5'] = 100 * weekly['retraced5'] / weekly['total']
+        monthly = grp.agg(**agg_kwargs).reset_index()
+        if 'retraced5' in monthly.columns:
+            monthly['rate5'] = 100 * monthly['retraced5'] / monthly['total']
         else:
-            weekly['rate5'] = np.nan
-        if 'retraced10' in weekly.columns:
-            weekly['rate10'] = 100 * weekly['retraced10'] / weekly['total']
+            monthly['rate5'] = np.nan
+        if 'retraced10' in monthly.columns:
+            monthly['rate10'] = 100 * monthly['retraced10'] / monthly['total']
         else:
-            weekly['rate10'] = np.nan
+            monthly['rate10'] = np.nan
         
-        # Calculate 30-day (6-week) simple moving averages
-        weekly['sma5'] = weekly['rate5'].rolling(window=6, min_periods=1).mean()
-        weekly['sma10'] = weekly['rate10'].rolling(window=6, min_periods=1).mean()
+        # Calculate 100-day (5-month) simple moving averages
+        monthly['sma5'] = monthly['rate5'].rolling(window=5, min_periods=1).mean()
+        monthly['sma10'] = monthly['rate10'].rolling(window=5, min_periods=1).mean()
     else:
-        weekly = pd.DataFrame(columns=['week', 'total', 'retraced5', 'retraced10', 'rate5', 'rate10', 'sma5', 'sma10'])
+        monthly = pd.DataFrame(columns=['month', 'total', 'retraced5', 'retraced10', 'rate5', 'rate10', 'sma5', 'sma10'])
 
     # Performance summary (overall and by year)
     # Define columns to use
@@ -304,30 +304,30 @@ def build_report(csv_path: str, out_path: str) -> None:
         perf_table_5_html = pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor']).to_html(index=False)
         perf_table_10_html = pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor']).to_html(index=False)
 
-    # Charts (changed to weekly with SMA overlay)
-    if not weekly.empty:
+    # Charts (changed to monthly with SMA overlay)
+    if not monthly.empty:
         import plotly.graph_objects as go
         
-        # 5d weekly chart with SMA
+        # 5d monthly chart with SMA
         fig_daily_5 = go.Figure()
-        fig_daily_5.add_trace(go.Scatter(x=weekly['week'], y=weekly['rate5'], mode='lines+markers', 
-                                        name='Weekly 5d rate', line=dict(color='blue')))
-        fig_daily_5.add_trace(go.Scatter(x=weekly['week'], y=weekly['sma5'], mode='lines', 
-                                        name='30-day SMA', line=dict(color='red', width=2)))
-        fig_daily_5.update_layout(title='Weekly 5d retracement rate (%) with 30-day SMA', 
-                                 xaxis_title='Week', yaxis_title='Rate (%)')
+        fig_daily_5.add_trace(go.Scatter(x=monthly['month'], y=monthly['rate5'], mode='lines', 
+                                        name='Monthly 5d rate', line=dict(color='blue')))
+        fig_daily_5.add_trace(go.Scatter(x=monthly['month'], y=monthly['sma5'], mode='lines', 
+                                        name='100-day SMA', line=dict(color='red', width=2)))
+        fig_daily_5.update_layout(title='Monthly 5d retracement rate (%) with 100-day SMA', 
+                                 xaxis_title='Month', yaxis_title='Rate (%)')
         
-        # 10d weekly chart with SMA
+        # 10d monthly chart with SMA
         fig_daily_10 = go.Figure()
-        fig_daily_10.add_trace(go.Scatter(x=weekly['week'], y=weekly['rate10'], mode='lines+markers', 
-                                         name='Weekly 10d rate', line=dict(color='blue')))
-        fig_daily_10.add_trace(go.Scatter(x=weekly['week'], y=weekly['sma10'], mode='lines', 
-                                         name='30-day SMA', line=dict(color='red', width=2)))
-        fig_daily_10.update_layout(title='Weekly 10d retracement rate (%) with 30-day SMA', 
-                                  xaxis_title='Week', yaxis_title='Rate (%)')
+        fig_daily_10.add_trace(go.Scatter(x=monthly['month'], y=monthly['rate10'], mode='lines', 
+                                         name='Monthly 10d rate', line=dict(color='blue')))
+        fig_daily_10.add_trace(go.Scatter(x=monthly['month'], y=monthly['sma10'], mode='lines', 
+                                         name='100-day SMA', line=dict(color='red', width=2)))
+        fig_daily_10.update_layout(title='Monthly 10d retracement rate (%) with 100-day SMA', 
+                                  xaxis_title='Month', yaxis_title='Rate (%)')
     else:
-        fig_daily_5 = px.scatter(title='No weekly data')
-        fig_daily_10 = px.scatter(title='No weekly data')
+        fig_daily_5 = px.scatter(title='No monthly data')
+        fig_daily_10 = px.scatter(title='No monthly data')
 
     # Monthly win rate charts (5d and 10d)
     if 'date' in df.columns and not df['date'].isna().all():
