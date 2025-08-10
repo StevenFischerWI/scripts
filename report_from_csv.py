@@ -287,52 +287,86 @@ def build_report(csv_path: str, out_path: str) -> None:
         rows5 = []
         for y, g in df_year.groupby('year', dropna=True):
             trades = int(len(g))
+            
+            # AVWAP retrace rate and profit factor
             if win_col_5 and win_col_5 in g.columns and trades > 0:
-                wr5 = 100.0 * pd.to_numeric(g[win_col_5], errors='coerce').fillna(0).astype(float).mean()
+                avwap_rate_5 = 100.0 * pd.to_numeric(g[win_col_5], errors='coerce').fillna(0).astype(float).mean()
             else:
-                wr5 = np.nan
+                avwap_rate_5 = np.nan
             if 'retrace_frac_5d' in g.columns and not g['retrace_frac_5d'].isna().all():
                 p5 = float(g['retrace_frac_5d'].sum())
                 l5 = float((1.0 - g['retrace_frac_5d']).sum())
-                pf5 = np.inf if p5 > 0 and l5 == 0 else (p5 / l5 if l5 > 0 else np.nan)
+                avwap_pf_5 = np.inf if p5 > 0 and l5 == 0 else (p5 / l5 if l5 > 0 else np.nan)
             else:
-                pf5 = np.nan
+                avwap_pf_5 = np.nan
+
+            # 21 EMA retrace rate
+            if 'retraced_to_21ema_5d' in g.columns and trades > 0:
+                ema_rate_5 = 100.0 * pd.to_numeric(g['retraced_to_21ema_5d'], errors='coerce').fillna(0).astype(float).mean()
+            else:
+                ema_rate_5 = np.nan
+
+            # Gap closure rate
+            if retrace_pct_5_col and retrace_pct_5_col in g.columns and trades > 0:
+                gap_closed_5 = pd.to_numeric(g[retrace_pct_5_col], errors='coerce') >= 100
+                gap_rate_5 = 100.0 * gap_closed_5.mean()
+            else:
+                gap_rate_5 = np.nan
 
             rows5.append({
                 'Year': int(y),
                 'Trades': trades,
-                'Win Rate %': round(wr5, 2) if pd.notna(wr5) else np.nan,
-                'Profit Factor': (round(pf5, 2) if np.isfinite(pf5) else (np.nan if np.isnan(pf5) else np.inf))
+                'AVWAP %': round(avwap_rate_5, 2) if pd.notna(avwap_rate_5) else np.nan,
+                'AVWAP PF': (round(avwap_pf_5, 2) if np.isfinite(avwap_pf_5) else (np.nan if np.isnan(avwap_pf_5) else np.inf)),
+                '21EMA %': round(ema_rate_5, 2) if pd.notna(ema_rate_5) else np.nan,
+                'Gap Close %': round(gap_rate_5, 2) if pd.notna(gap_rate_5) else np.nan
             })
-        perf_df_5 = pd.DataFrame(rows5).sort_values('Year') if rows5 else pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor'])
+        perf_df_5 = pd.DataFrame(rows5).sort_values('Year') if rows5 else pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', '21EMA %', 'Gap Close %'])
         perf_table_5_html = perf_df_5.to_html(index=False)
 
         # 10d table
         rows10 = []
         for y, g in df_year.groupby('year', dropna=True):
             trades = int(len(g))
+            
+            # AVWAP retrace rate and profit factor
             if win_col_10 and win_col_10 in g.columns and trades > 0:
-                wr10 = 100.0 * pd.to_numeric(g[win_col_10], errors='coerce').fillna(0).astype(float).mean()
+                avwap_rate_10 = 100.0 * pd.to_numeric(g[win_col_10], errors='coerce').fillna(0).astype(float).mean()
             else:
-                wr10 = np.nan
+                avwap_rate_10 = np.nan
             if 'retrace_frac_10d' in g.columns and not g['retrace_frac_10d'].isna().all():
                 p10 = float(g['retrace_frac_10d'].sum())
                 l10 = float((1.0 - g['retrace_frac_10d']).sum())
-                pf10 = np.inf if p10 > 0 and l10 == 0 else (p10 / l10 if l10 > 0 else np.nan)
+                avwap_pf_10 = np.inf if p10 > 0 and l10 == 0 else (p10 / l10 if l10 > 0 else np.nan)
             else:
-                pf10 = np.nan
+                avwap_pf_10 = np.nan
+
+            # 21 EMA retrace rate
+            if 'retraced_to_21ema_10d' in g.columns and trades > 0:
+                ema_rate_10 = 100.0 * pd.to_numeric(g['retraced_to_21ema_10d'], errors='coerce').fillna(0).astype(float).mean()
+            else:
+                ema_rate_10 = np.nan
+
+            # Gap closure rate
+            if retrace_pct_10_col and retrace_pct_10_col in g.columns and trades > 0:
+                gap_closed_10 = pd.to_numeric(g[retrace_pct_10_col], errors='coerce') >= 100
+                gap_rate_10 = 100.0 * gap_closed_10.mean()
+            else:
+                gap_rate_10 = np.nan
 
             rows10.append({
                 'Year': int(y),
                 'Trades': trades,
-                'Win Rate %': round(wr10, 2) if pd.notna(wr10) else np.nan,
-                'Profit Factor': (round(pf10, 2) if np.isfinite(pf10) else (np.nan if np.isnan(pf10) else np.inf))
+                'AVWAP %': round(avwap_rate_10, 2) if pd.notna(avwap_rate_10) else np.nan,
+                'AVWAP PF': (round(avwap_pf_10, 2) if np.isfinite(avwap_pf_10) else (np.nan if np.isnan(avwap_pf_10) else np.inf)),
+                '21EMA %': round(ema_rate_10, 2) if pd.notna(ema_rate_10) else np.nan,
+                'Gap Close %': round(gap_rate_10, 2) if pd.notna(gap_rate_10) else np.nan
             })
-        perf_df_10 = pd.DataFrame(rows10).sort_values('Year') if rows10 else pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor'])
+        perf_df_10 = pd.DataFrame(rows10).sort_values('Year') if rows10 else pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', '21EMA %', 'Gap Close %'])
         perf_table_10_html = perf_df_10.to_html(index=False)
     else:
-        perf_table_5_html = pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor']).to_html(index=False)
-        perf_table_10_html = pd.DataFrame(columns=['Year', 'Trades', 'Win Rate %', 'Profit Factor']).to_html(index=False)
+        perf_table_5_html = pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', '21EMA %', 'Gap Close %']).to_html(index=False)
+        perf_table_10_html = pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', '21EMA %', 'Gap Close %']).to_html(index=False)
 
     # Charts (changed to monthly with SMA overlay)
     if not monthly.empty:
