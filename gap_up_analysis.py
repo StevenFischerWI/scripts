@@ -606,7 +606,8 @@ def main():
         all_results = []
         
         # Create CSV file for detailed results
-        csv_filename = 'output.csv'
+        direction_label = 'short' if args.gap_mode == 'up' else 'long'
+        csv_filename = f'output-{direction_label}.csv'
         logging.info(f"Writing detailed results to {csv_filename}")
         
         with open(csv_filename, 'w', newline='') as csvfile:
@@ -651,7 +652,7 @@ def main():
         print(f"Total gap-{args.gap_mode}s analyzed: {total_gap_ups}")
         print(f"Total that retraced to VWAP: {total_retraced}")
         print(f"Overall retracement rate: {overall_rate:.1f}%")
-        print(f"\nDetailed results saved to: output.csv")
+        print(f"\nDetailed results saved to: {csv_filename}")
         
     except Exception as e:
         print(f"Error during analysis: {e}")
