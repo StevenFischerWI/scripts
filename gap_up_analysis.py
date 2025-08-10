@@ -59,49 +59,30 @@ def find_gap_ups(conn, date: str, gap_threshold: float = 0.05) -> pd.DataFrame:
     """
     logging.debug(f"Finding gap-ups for {date} with threshold {gap_threshold*100}%")
     query = """
-    WITH previous_close AS (
-        SELECT 
-            symbol,
-            close as prev_close,
-            date,
-            LAG(date) OVER (PARTITION BY symbol ORDER BY date) as prev_date
-        FROM candle 
-        WHERE date < %s
-    ),
-    current_day AS (
-        SELECT 
-            symbol,
-            open,
-            high,
-            low,
-            close,
-            date,
-            COALESCE(volume, 0) as volume
-        FROM candle 
-        WHERE date = %s
-    )
-    SELECT 
+    SELECT
         c.symbol,
         c.open,
         c.high,
         c.low,
         c.close,
         c.date,
-        c.volume,
-        p.prev_close,
-        (c.open - p.prev_close) / p.prev_close as gap_percent
-    FROM current_day c
-    JOIN previous_close p ON c.symbol = p.symbol 
-    WHERE p.date = (
-        SELECT MAX(date) 
-        FROM candle 
-        WHERE symbol = c.symbol AND date < %s
-    )
-    AND (c.open - p.prev_close) / p.prev_close >= %s
+        COALESCE(c.volume, 0) as volume,
+        prev.close as prev_close,
+        (c.open - prev.close) / prev.close as gap_percent
+    FROM candle c
+    JOIN LATERAL (
+        SELECT close
+        FROM candle p
+        WHERE p.symbol = c.symbol AND p.date < %s
+        ORDER BY p.date DESC
+        LIMIT 1
+    ) prev ON TRUE
+    WHERE c.date = %s
+    AND (c.open - prev.close) / prev.close >= %s
     ORDER BY gap_percent DESC;
     """
     
-    df = pd.read_sql_query(query, conn, params=(date, date, date, gap_threshold))
+    df = pd.read_sql_query(query, conn, params=(date, date, gap_threshold))
     logging.debug(f"Found {len(df)} gap-ups for {date}")
     return df
 
@@ -289,67 +270,168 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer) -> Dict:
     retraced_count = 0
     
     logging.info(f"Processing {len(gap_ups)} gap-ups for {date}")
-    for i, (_, row) in enumerate(gap_ups.iterrows(), 1):
+    # Batch computations for performance (anchored VWAP, retracement/MFE/MAE, SMA-330)
+    symbols = gap_ups['symbol'].tolist()
+    gap_date_dt = datetime.strptime(date, '%Y-%m-%d')
+    start_date = (gap_date_dt - timedelta(days=3)).strftime('%Y-%m-%d')
+    end_date_10 = (gap_date_dt + timedelta(days=10)).strftime('%Y-%m-%d')
+
+    # Anchored VWAP from 3 days before through gap day for all symbols
+    vwap_query = """
+    SELECT symbol, date, high, low, close, COALESCE(volume, 0) AS volume
+    FROM candle
+    WHERE date BETWEEN %s AND %s
+      AND symbol = ANY(%s)
+    """
+    vwap_df = pd.read_sql_query(vwap_query, conn, params=(start_date, date, symbols))
+    anchored_vwap_map = {}
+    if not vwap_df.empty:
+        vwap_df['typical'] = (vwap_df['high'] + vwap_df['low'] + vwap_df['close']) / 3
+        vwap_df['tp_x_vol'] = vwap_df['typical'] * vwap_df['volume']
+        agg = vwap_df.groupby('symbol', as_index=False).agg(
+            tpv=('tp_x_vol', 'sum'),
+            vol=('volume', 'sum'),
+            typical_mean=('typical', 'mean')
+        )
+        agg['anchored_vwap'] = np.where(agg['vol'] > 0, agg['tpv'] / agg['vol'], agg['typical_mean'])
+        anchored_vwap_map = dict(zip(agg['symbol'], agg['anchored_vwap']))
+
+    # 10-day window after the gap day for retracement and MFE/MAE
+    post_query = """
+    SELECT symbol, date, high, low
+    FROM candle
+    WHERE date > %s AND date <= %s
+      AND symbol = ANY(%s)
+    ORDER BY symbol, date
+    """
+    post_df = pd.read_sql_query(post_query, conn, params=(date, end_date_10, symbols))
+    post_df['date'] = pd.to_datetime(post_df['date']) if not post_df.empty else post_df
+
+    # Gap day prices mapped by symbol
+    open_by_symbol = dict(zip(gap_ups['symbol'], gap_ups['open']))
+    close_by_symbol = dict(zip(gap_ups['symbol'], gap_ups['close']))
+
+    # Compute per-symbol retracement and MFE/MAE
+    retraced_map = {}
+    mfe_mae_map = {}
+    lowest_low_map = {}
+    if not post_df.empty:
+        for sym, g in post_df.groupby('symbol'):
+            lowest_low = g['low'].min()
+            highest_high = g['high'].max()
+            lowest_low_map[sym] = lowest_low
+
+            avwap = anchored_vwap_map.get(sym, np.nan)
+            retraced = False
+            days_to_retrace = None
+            if pd.notna(avwap):
+                hit = g[g['low'] <= avwap]
+                if not hit.empty:
+                    retraced = True
+                    first_hit_date = hit['date'].iloc[0]
+                    days_to_retrace = (first_hit_date - gap_date_dt).days
+
+            close_price = close_by_symbol.get(sym, np.nan)
+            if pd.notna(close_price) and close_price > 0:
+                mfe_dollars = highest_high - close_price
+                mae_dollars = close_price - lowest_low
+                mfe_percent = (mfe_dollars / close_price) * 100
+                mae_percent = (mae_dollars / close_price) * 100
+            else:
+                mfe_dollars = mae_dollars = mfe_percent = mae_percent = 0.0
+
+            retraced_map[sym] = (retraced, days_to_retrace)
+            mfe_mae_map[sym] = (mfe_dollars, mae_dollars, mfe_percent, mae_percent)
+    else:
+        for sym in symbols:
+            lowest_low_map[sym] = np.nan
+            retraced_map[sym] = (False, None)
+            mfe_mae_map[sym] = (0.0, 0.0, 0.0, 0.0)
+
+    # 330-day SMA distance for all symbols
+    sma_query = """
+    SELECT symbol, close
+    FROM (
+        SELECT symbol, close, date,
+               ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+        FROM candle
+        WHERE symbol = ANY(%s) AND date <= %s
+    ) t
+    WHERE rn <= 330
+    """
+    sma_df = pd.read_sql_query(sma_query, conn, params=(symbols, date))
+    sma_330_map = {}
+    if not sma_df.empty:
+        sma_330_map = sma_df.groupby('symbol')['close'].mean().to_dict()
+
+    # SPY daily gain for this date (single query)
+    spy_daily_gain = get_spy_daily_gain(conn, date)
+
+    # Build results and CSV rows
+    csv_rows = []
+    for _, row in gap_ups.iterrows():
         symbol = row['symbol']
         gap_percent = row['gap_percent']
-        
-        if i % 10 == 0 or i == len(gap_ups):
-            logging.info(f"Processing symbol {i}/{len(gap_ups)}: {symbol}")
-        
-        # Get anchored VWAP from 3 days before through gap day
-        anchored_vwap = get_anchored_vwap_through_gap_day(conn, symbol, date)
-        
-        if anchored_vwap > 0:
-            # Check if it retraced to anchored VWAP
-            retraced, days_to_retrace, retrace_percentage = check_retracement_to_vwap(conn, symbol, date, anchored_vwap, row['open'])
-            
-            # Get MFE and MAE for 10 days following the gap-up
-            mfe_dollars, mae_dollars, mfe_percent, mae_percent = get_mfe_mae_10_days(conn, symbol, date, row['close'])
-            
-            # Get distance from 330-period SMA
-            sma_330_distance = get_sma_330_distance(conn, symbol, date, row['close'])
-            
-            # Get SPY daily gain for this date
-            spy_daily_gain = get_spy_daily_gain(conn, date)
-            
-            if retraced:
-                retraced_count += 1
-            
-            # Write to CSV
-            csv_writer.writerow({
-                'ticker': symbol,
-                'date': date,
-                'gap_up_percent': round(gap_percent * 100, 2),
-                'open_price': round(row['open'], 2),
-                'close_price': round(row['close'], 2),
-                'anchored_vwap': round(anchored_vwap, 2),
-                'retraced_to_vwap': retraced,
-                'days_to_retrace': days_to_retrace if days_to_retrace is not None else '',
-                'retrace_percentage': round(retrace_percentage, 2),
-                'mfe_dollars': round(mfe_dollars, 2),
-                'mae_dollars': round(mae_dollars, 2),
-                'mfe_percent': round(mfe_percent, 2),
-                'mae_percent': round(mae_percent, 2),
-                'sma_330_distance_percent': round(sma_330_distance, 2) if sma_330_distance is not None else '',
-                'spy_daily_gain_percent': round(spy_daily_gain, 2) if spy_daily_gain is not None else ''
-            })
-            
-            results.append({
-                'symbol': symbol,
-                'gap_percent': gap_percent * 100,  # Convert to percentage
-                'open_price': row['open'],
-                'close_price': row['close'],
-                'anchored_vwap': anchored_vwap,
-                'retraced_to_vwap': retraced,
-                'days_to_retrace': days_to_retrace,
-                'retrace_percentage': retrace_percentage,
-                'mfe_dollars': mfe_dollars,
-                'mae_dollars': mae_dollars,
-                'mfe_percent': mfe_percent,
-                'mae_percent': mae_percent,
-                'sma_330_distance_percent': sma_330_distance,
-                'spy_daily_gain_percent': spy_daily_gain
-            })
+        open_price = row['open']
+        close_price = row['close']
+
+        anchored_vwap = float(anchored_vwap_map.get(symbol, 0.0))
+        retraced, days_to_retrace = retraced_map.get(symbol, (False, None))
+        lowest_low = lowest_low_map.get(symbol, np.nan)
+        mfe_dollars, mae_dollars, mfe_percent, mae_percent = mfe_mae_map.get(symbol, (0.0, 0.0, 0.0, 0.0))
+
+        sma_base = sma_330_map.get(symbol)
+        sma_330_distance = ((close_price - sma_base) / sma_base) * 100 if sma_base and sma_base > 0 else None
+
+        if retraced:
+            retraced_count += 1
+
+        # Retracement percentage using lowest low in the 10-day window
+        if anchored_vwap > 0 and open_price > anchored_vwap and pd.notna(lowest_low):
+            max_possible_retrace = open_price - anchored_vwap
+            actual_retrace = open_price - float(lowest_low)
+            retrace_percentage = (actual_retrace / max_possible_retrace) * 100 if max_possible_retrace > 0 else 0.0
+        else:
+            retrace_percentage = 0.0
+
+        csv_rows.append({
+            'ticker': symbol,
+            'date': date,
+            'gap_up_percent': round(gap_percent * 100, 2),
+            'open_price': round(open_price, 2),
+            'close_price': round(close_price, 2),
+            'anchored_vwap': round(anchored_vwap, 2),
+            'retraced_to_vwap': retraced,
+            'days_to_retrace': days_to_retrace if days_to_retrace is not None else '',
+            'retrace_percentage': round(retrace_percentage, 2),
+            'mfe_dollars': round(mfe_dollars, 2),
+            'mae_dollars': round(mae_dollars, 2),
+            'mfe_percent': round(mfe_percent, 2),
+            'mae_percent': round(mae_percent, 2),
+            'sma_330_distance_percent': round(sma_330_distance, 2) if sma_330_distance is not None else '',
+            'spy_daily_gain_percent': round(spy_daily_gain, 2) if spy_daily_gain is not None else ''
+        })
+
+        results.append({
+            'symbol': symbol,
+            'gap_percent': gap_percent * 100,  # Convert to percentage
+            'open_price': open_price,
+            'close_price': close_price,
+            'anchored_vwap': anchored_vwap,
+            'retraced_to_vwap': retraced,
+            'days_to_retrace': days_to_retrace,
+            'retrace_percentage': retrace_percentage,
+            'mfe_dollars': mfe_dollars,
+            'mae_dollars': mae_dollars,
+            'mfe_percent': mfe_percent,
+            'mae_percent': mae_percent,
+            'sma_330_distance_percent': sma_330_distance,
+            'spy_daily_gain_percent': spy_daily_gain
+        })
+
+    # Write all rows at once for this date
+    if csv_rows:
+        csv_writer.writerows(csv_rows)
     
     total_gap_ups = len(results)
     retracement_rate = (retraced_count / total_gap_ups * 100) if total_gap_ups > 0 else 0
