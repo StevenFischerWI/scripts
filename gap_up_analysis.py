@@ -14,6 +14,9 @@ import logging
 import csv
 from typing import List, Dict, Tuple, Optional
 from sqlalchemy import create_engine
+import concurrent.futures
+from multiprocessing import cpu_count
+import threading
 
 # Database connection parameters
 DB_CONFIG = {
@@ -28,11 +31,21 @@ def connect_to_db():
     try:
         logging.info("Connecting to database...")
         connection_string = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}/{DB_CONFIG['database']}"
-        engine = create_engine(connection_string)
+        engine = create_engine(connection_string, pool_size=10, max_overflow=20)
         logging.info("Database connection established")
         return engine
     except Exception as e:
         logging.error(f"Error connecting to database: {e}")
+        return None
+
+def get_thread_connection():
+    """Get a database connection for thread-safe operations."""
+    try:
+        connection_string = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}/{DB_CONFIG['database']}"
+        engine = create_engine(connection_string)
+        return engine
+    except Exception as e:
+        logging.error(f"Error creating thread connection: {e}")
         return None
 
 def calculate_vwap(df: pd.DataFrame) -> float:
@@ -456,9 +469,9 @@ def check_21ema_retracement(conn, symbol: str, gap_date: str, ema_21: float, gap
         logging.debug(f"Error checking 21 EMA retracement for {symbol}: {e}")
         return False, None
 
-def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') -> Dict:
-    """Analyze gap-ups for a specific date and write results to CSV."""
-    logging.info(f"Analyzing gap-{gap_mode}s for {date}...")
+def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> Dict:
+    """Thread-safe version that returns data instead of writing to CSV directly."""
+    logging.debug(f"Analyzing gap-{gap_mode}s for {date}...")
     
     gap_ups = find_gap_ups(conn, date, gap_mode=gap_mode)
     
@@ -775,10 +788,6 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
             'spy_daily_gain_percent': spy_daily_gain
         })
 
-    # Write all rows at once for this date
-    if csv_rows:
-        csv_writer.writerows(csv_rows)
-    
     total_gap_ups = len(results)
     retracement_rate_5d = (retraced_count_5 / total_gap_ups * 100) if total_gap_ups > 0 else 0
     retracement_rate = (retraced_count_10 / total_gap_ups * 100) if total_gap_ups > 0 else 0
@@ -790,8 +799,22 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') 
         'retracement_rate_5d': retracement_rate_5d,
         'retraced_to_vwap': retraced_count_10,
         'retracement_rate': retracement_rate,
+        'csv_rows': csv_rows,  # Return rows instead of writing
         'details': results
     }
+
+def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') -> Dict:
+    """Legacy single-threaded version for backwards compatibility."""
+    result = analyze_gap_ups_for_date_parallel(conn, date, gap_mode)
+    
+    # Write CSV rows
+    if result['csv_rows']:
+        csv_writer.writerows(result['csv_rows'])
+    
+    # Remove csv_rows from result to match original interface
+    result_copy = result.copy()
+    del result_copy['csv_rows']
+    return result_copy
 
 def get_available_dates(conn, start_date: str = None, end_date: str = None) -> List[str]:
     """Get list of available trading dates from the database between start and end dates."""
@@ -823,6 +846,10 @@ def main():
                        help='Enable verbose logging')
     parser.add_argument('--gap-mode', choices=['up', 'down'], default='up',
                        help='Gap direction to analyze: up (default) or down')
+    parser.add_argument('--parallel', '-p', action='store_true',
+                       help='Enable parallel processing for faster analysis')
+    parser.add_argument('--workers', '-w', type=int, default=None,
+                       help='Number of parallel workers (default: auto-detect)')
     
     args = parser.parse_args()
     
@@ -859,47 +886,111 @@ def main():
         csv_filename = f'output-{direction_label}.csv'
         logging.info(f"Writing detailed results to {csv_filename}")
         
-        with open(csv_filename, 'w', newline='') as csvfile:
-            fieldnames = [
-                'ticker','date','gap_up_percent','open_price','close_price','anchored_vwap',
-                'retraced_to_vwap_5d','days_to_retrace_5d','retrace_percentage_5d','mfe_dollars_5d','mae_dollars_5d','mfe_percent_5d','mae_percent_5d',
-                'retraced_to_vwap_10d','days_to_retrace_10d','retrace_percentage_10d','mfe_dollars_10d','mae_dollars_10d','mfe_percent_10d','mae_percent_10d',
-                'ema_21','retraced_to_21ema_5d','days_to_21ema_5d','retraced_to_21ema_10d','days_to_21ema_10d',
-                'sma_21_distance_percent','sma_50_distance_percent','sma_100_distance_percent','sma_200_distance_percent','sma_330_distance_percent',
-                'avwap_current_distance_percent','avwap_2q_ago_distance_percent','avwap_3q_ago_distance_percent','avwap_1y_ago_distance_percent',
-                'spy_daily_gain_percent'
-            ]
-            csv_writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            csv_writer.writeheader()
+        fieldnames = [
+            'ticker','date','gap_up_percent','open_price','close_price','anchored_vwap',
+            'retraced_to_vwap_5d','days_to_retrace_5d','retrace_percentage_5d','mfe_dollars_5d','mae_dollars_5d','mfe_percent_5d','mae_percent_5d',
+            'retraced_to_vwap_10d','days_to_retrace_10d','retrace_percentage_10d','mfe_dollars_10d','mae_dollars_10d','mfe_percent_10d','mae_percent_10d',
+            'ema_21','retraced_to_21ema_5d','days_to_21ema_5d','retraced_to_21ema_10d','days_to_21ema_10d',
+            'sma_21_distance_percent','sma_50_distance_percent','sma_100_distance_percent','sma_200_distance_percent','sma_330_distance_percent',
+            'avwap_current_distance_percent','avwap_2q_ago_distance_percent','avwap_3q_ago_distance_percent','avwap_1y_ago_distance_percent',
+            'spy_daily_gain_percent'
+        ]
+        
+        if args.parallel:
+            # Parallel processing
+            max_workers = args.workers or min(cpu_count(), len(dates), 8)
+            logging.info(f"Using parallel processing with {max_workers} workers")
             
-            for i, date in enumerate(dates, 1):
-                logging.info(f"Processing date {i}/{len(dates)}: {date}")
-                result = analyze_gap_ups_for_date(conn, date, csv_writer, gap_mode=args.gap_mode)
-                all_results.append(result)
+            # Thread-safe CSV writing
+            csv_lock = threading.Lock()
+            
+            with open(csv_filename, 'w', newline='') as csvfile:
+                csv_writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                csv_writer.writeheader()
                 
-                # Print summary for this date
-                print(f"Date: {result['date']}")
-                print(f"Total gap-{args.gap_mode}s (>=5%): {result['total_gap_ups']}")
-                print(f"Retraced to VWAP (5d): {result['retraced_to_vwap_5d']}  rate: {result['retracement_rate_5d']:.1f}%")
-                print(f"Retraced to VWAP (10d): {result['retraced_to_vwap']}  rate: {result['retracement_rate']:.1f}%")
+                def process_date_with_connection(date):
+                    """Process a single date with its own database connection."""
+                    thread_conn = get_thread_connection()
+                    if not thread_conn:
+                        logging.error(f"Failed to get connection for {date}")
+                        return None
+                    
+                    try:
+                        result = analyze_gap_ups_for_date_parallel(thread_conn, date, args.gap_mode)
+                        
+                        # Thread-safe CSV writing
+                        if result['csv_rows']:
+                            with csv_lock:
+                                csv_writer.writerows(result['csv_rows'])
+                        
+                        return result
+                    except Exception as e:
+                        logging.error(f"Error processing {date}: {e}")
+                        return None
+                    finally:
+                        thread_conn.dispose()
                 
-                # Print top gap-ups for this date
-                if result['details']:
-                    print(f"\nTop gap-{args.gap_mode}s:")
-                    for detail in sorted(result['details'], key=lambda x: x['gap_percent'], reverse=True)[:5]:
-                        r5 = "✓" if detail['retraced_to_vwap_5d'] else "✗"
-                        d5 = f" ({detail['days_to_retrace_5d']}d)" if detail['days_to_retrace_5d'] is not None else ""
-                        r10 = "✓" if detail['retraced_to_vwap'] else "✗"
-                        d10 = f" ({detail['days_to_retrace']}d)" if detail['days_to_retrace'] is not None else ""
-                        print(f"  {detail['symbol']}: {detail['gap_percent']:.1f}% gap, AVWAP ${detail['anchored_vwap']:.2f}, "
-                              f"5d: {r5}{d5}, {detail['retrace_percentage_5d']:.1f}% | "
-                              f"10d: {r10}{d10}, {detail['retrace_percentage']:.1f}%, "
-                              f"MFE 5d: ${detail['mfe_dollars_5d']:.2f} ({detail['mfe_percent_5d']:.1f}%), "
-                              f"MAE 5d: ${detail['mae_dollars_5d']:.2f} ({detail['mae_percent_5d']:.1f}%), "
-                              f"MFE 10d: ${detail['mfe_dollars']:.2f} ({detail['mfe_percent']:.1f}%), "
-                              f"MAE 10d: ${detail['mae_dollars']:.2f} ({detail['mae_percent']:.1f}%)")
+                # Use ThreadPoolExecutor for I/O bound database operations
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submit all dates for processing
+                    future_to_date = {executor.submit(process_date_with_connection, date): date for date in dates}
+                    
+                    # Collect results as they complete
+                    completed = 0
+                    for future in concurrent.futures.as_completed(future_to_date):
+                        date = future_to_date[future]
+                        completed += 1
+                        
+                        try:
+                            result = future.result()
+                            if result:
+                                all_results.append(result)
+                                
+                                # Print progress
+                                print(f"✓ [{completed}/{len(dates)}] {date}: {result['total_gap_ups']} gaps, "
+                                      f"5d: {result['retracement_rate_5d']:.1f}%, 10d: {result['retracement_rate']:.1f}%")
+                            else:
+                                print(f"✗ [{completed}/{len(dates)}] {date}: Failed to process")
+                                
+                        except Exception as e:
+                            print(f"✗ [{completed}/{len(dates)}] {date}: Error - {e}")
+                    
+                    # Sort results by date for consistent output
+                    all_results.sort(key=lambda x: x['date'])
+        else:
+            # Sequential processing (original behavior)
+            with open(csv_filename, 'w', newline='') as csvfile:
+                csv_writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                csv_writer.writeheader()
                 
-                print("-" * 40)
+                for i, date in enumerate(dates, 1):
+                    logging.info(f"Processing date {i}/{len(dates)}: {date}")
+                    result = analyze_gap_ups_for_date(conn, date, csv_writer, gap_mode=args.gap_mode)
+                    all_results.append(result)
+                    
+                    # Print summary for this date
+                    print(f"Date: {result['date']}")
+                    print(f"Total gap-{args.gap_mode}s (>=5%): {result['total_gap_ups']}")
+                    print(f"Retraced to VWAP (5d): {result['retraced_to_vwap_5d']}  rate: {result['retracement_rate_5d']:.1f}%")
+                    print(f"Retraced to VWAP (10d): {result['retraced_to_vwap']}  rate: {result['retracement_rate']:.1f}%")
+                    
+                    # Print top gap-ups for this date
+                    if result['details']:
+                        print(f"\nTop gap-{args.gap_mode}s:")
+                        for detail in sorted(result['details'], key=lambda x: x['gap_percent'], reverse=True)[:5]:
+                            r5 = "✓" if detail['retraced_to_vwap_5d'] else "✗"
+                            d5 = f" ({detail['days_to_retrace_5d']}d)" if detail['days_to_retrace_5d'] is not None else ""
+                            r10 = "✓" if detail['retraced_to_vwap'] else "✗"
+                            d10 = f" ({detail['days_to_retrace']}d)" if detail['days_to_retrace'] is not None else ""
+                            print(f"  {detail['symbol']}: {detail['gap_percent']:.1f}% gap, AVWAP ${detail['anchored_vwap']:.2f}, "
+                                  f"5d: {r5}{d5}, {detail['retrace_percentage_5d']:.1f}% | "
+                                  f"10d: {r10}{d10}, {detail['retrace_percentage']:.1f}%, "
+                                  f"MFE 5d: ${detail['mfe_dollars_5d']:.2f} ({detail['mfe_percent_5d']:.1f}%), "
+                                  f"MAE 5d: ${detail['mae_dollars_5d']:.2f} ({detail['mae_percent_5d']:.1f}%), "
+                                  f"MFE 10d: ${detail['mfe_dollars']:.2f} ({detail['mfe_percent']:.1f}%), "
+                                  f"MAE 10d: ${detail['mae_dollars']:.2f} ({detail['mae_percent']:.1f}%)")
+                    
+                    print("-" * 40)
         
         # Overall summary
         total_gap_ups = sum(r['total_gap_ups'] for r in all_results)
