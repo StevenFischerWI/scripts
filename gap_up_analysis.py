@@ -52,51 +52,90 @@ def calculate_vwap(df: pd.DataFrame) -> float:
     
     return vwap
 
-def find_gap_ups(conn, date: str, gap_threshold: float = 0.05) -> pd.DataFrame:
+def find_gap_ups(conn, date: str, gap_threshold: float = 0.05, gap_mode: str = 'up') -> pd.DataFrame:
     """
     Find all gap-ups over the threshold for a given date.
     Gap-up = (open - previous_close) / previous_close > threshold
     """
-    logging.debug(f"Finding gap-ups for {date} with threshold {gap_threshold*100}%")
-    query = """
-    SELECT
-        c.symbol,
-        c.open,
-        c.high,
-        c.low,
-        c.close,
-        c.date,
-        c.volume,
-        prev.close AS prev_close,
-        (c.open - prev.close) / prev.close AS gap_percent
-    FROM (
-        SELECT DISTINCT ON (symbol, date)
-            symbol,
-            open,
-            high,
-            low,
-            close,
-            date,
-            COALESCE(volume, 0) AS volume
-        FROM candle
-        WHERE date = %s
-        ORDER BY symbol, date, COALESCE(volume, 0) DESC
-    ) c
-    JOIN LATERAL (
-        SELECT close
-        FROM candle p
-        WHERE p.symbol = c.symbol AND p.date < %s
-        ORDER BY p.date DESC
-        LIMIT 1
-    ) prev ON TRUE
-    WHERE prev.close >= %s
-      AND (c.open - prev.close) / prev.close >= %s
-    ORDER BY gap_percent DESC;
-    """
+    logging.debug(f"Finding gap-{gap_mode}s for {date} with threshold {gap_threshold*100}%")
+    if gap_mode == 'up':
+        query = """
+        SELECT
+            c.symbol,
+            c.open,
+            c.high,
+            c.low,
+            c.close,
+            c.date,
+            c.volume,
+            prev.close AS prev_close,
+            (c.open - prev.close) / prev.close AS gap_percent
+        FROM (
+            SELECT DISTINCT ON (symbol, date)
+                symbol,
+                open,
+                high,
+                low,
+                close,
+                date,
+                COALESCE(volume, 0) AS volume
+            FROM candle
+            WHERE date = %s
+            ORDER BY symbol, date, COALESCE(volume, 0) DESC
+        ) c
+        JOIN LATERAL (
+            SELECT close
+            FROM candle p
+            WHERE p.symbol = c.symbol AND p.date < %s
+            ORDER BY p.date DESC
+            LIMIT 1
+        ) prev ON TRUE
+        WHERE prev.close >= %s
+          AND (c.open - prev.close) / prev.close >= %s
+        ORDER BY gap_percent DESC;
+        """
+        params = (date, date, 20.0, gap_threshold)
+    else:
+        query = """
+        SELECT
+            c.symbol,
+            c.open,
+            c.high,
+            c.low,
+            c.close,
+            c.date,
+            c.volume,
+            prev.close AS prev_close,
+            (prev.close - c.open) / prev.close AS gap_percent
+        FROM (
+            SELECT DISTINCT ON (symbol, date)
+                symbol,
+                open,
+                high,
+                low,
+                close,
+                date,
+                COALESCE(volume, 0) AS volume
+            FROM candle
+            WHERE date = %s
+            ORDER BY symbol, date, COALESCE(volume, 0) DESC
+        ) c
+        JOIN LATERAL (
+            SELECT close
+            FROM candle p
+            WHERE p.symbol = c.symbol AND p.date < %s
+            ORDER BY p.date DESC
+            LIMIT 1
+        ) prev ON TRUE
+        WHERE prev.close >= %s
+          AND (prev.close - c.open) / prev.close >= %s
+        ORDER BY gap_percent DESC;
+        """
+        params = (date, date, 20.0, gap_threshold)
     
-    df = pd.read_sql_query(query, conn, params=(date, date, 20.0, gap_threshold))
+    df = pd.read_sql_query(query, conn, params=params)
     df = df.drop_duplicates(subset=['symbol', 'date'], keep='first')
-    logging.debug(f"Found {len(df)} gap-ups for {date}")
+    logging.debug(f"Found {len(df)} gap-{gap_mode}s for {date}")
     return df
 
 def get_anchored_vwap_through_gap_day(conn, symbol: str, gap_date: str) -> float:
@@ -263,11 +302,11 @@ def get_spy_daily_gain(conn, gap_date: str) -> float:
     
     return df['daily_gain_percent'].iloc[0]
 
-def analyze_gap_ups_for_date(conn, date: str, csv_writer) -> Dict:
+def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') -> Dict:
     """Analyze gap-ups for a specific date and write results to CSV."""
-    logging.info(f"Analyzing gap-ups for {date}...")
+    logging.info(f"Analyzing gap-{gap_mode}s for {date}...")
     
-    gap_ups = find_gap_ups(conn, date)
+    gap_ups = find_gap_ups(conn, date, gap_mode=gap_mode)
     
     if gap_ups.empty:
         logging.info(f"No gap-ups found for {date}")
@@ -315,15 +354,22 @@ def analyze_gap_ups_for_date(conn, date: str, csv_writer) -> Dict:
         agg['anchored_vwap'] = np.where(agg['vol'] > 0, agg['tpv'] / agg['vol'], agg['typical_mean'])
         anchored_vwap_map = dict(zip(agg['symbol'], agg['anchored_vwap']))
 
-    # Filter gap-ups by "room to AVWAP" >= 2% of prior close (requires prev_close)
+    # Filter candidates by AVWAP "room" >= 2% of prior close, aligned with gap mode
     if not gap_ups.empty:
-        avwap_series = gap_ups['symbol'].map(anchored_vwap_map)
-        room = gap_ups['open'] - avwap_series.astype(float)
+        avwap_series = gap_ups['symbol'].map(anchored_vwap_map).astype(float)
         threshold = 0.02 * gap_ups['prev_close']
-        gap_ups = gap_ups[avwap_series.notna() & (room >= threshold)].reset_index(drop=True)
+
+        if gap_mode == 'up':
+            # Short fade to AVWAP on gap-ups: open above AVWAP with sufficient room
+            cond = avwap_series.notna() & (gap_ups['open'] > avwap_series) & ((gap_ups['open'] - avwap_series) >= threshold)
+        else:
+            # Long bounce to AVWAP on gap-downs: open below AVWAP with sufficient room
+            cond = avwap_series.notna() & (gap_ups['open'] < avwap_series) & ((avwap_series - gap_ups['open']) >= threshold)
+
+        gap_ups = gap_ups[cond].reset_index(drop=True)
         symbols = gap_ups['symbol'].tolist()
         if gap_ups.empty:
-            logging.info(f"No gap-ups meet AVWAP room >= 2% of prior close for {date}")
+            logging.info(f"No gap-{gap_mode}s meet AVWAP room >= 2% of prior close for {date}")
             return {
                 'date': date,
                 'total_gap_ups': 0,
@@ -519,6 +565,8 @@ def main():
                        help='End date for analysis (YYYY-MM-DD). Defaults to today.')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Enable verbose logging')
+    parser.add_argument('--gap-mode', choices=['up', 'down'], default='up',
+                       help='Gap direction to analyze: up (default) or down')
     
     args = parser.parse_args()
     
@@ -561,18 +609,18 @@ def main():
             
             for i, date in enumerate(dates, 1):
                 logging.info(f"Processing date {i}/{len(dates)}: {date}")
-                result = analyze_gap_ups_for_date(conn, date, csv_writer)
+                result = analyze_gap_ups_for_date(conn, date, csv_writer, gap_mode=args.gap_mode)
                 all_results.append(result)
                 
                 # Print summary for this date
                 print(f"Date: {result['date']}")
-                print(f"Total gap-ups (>=5%): {result['total_gap_ups']}")
+                print(f"Total gap-{args.gap_mode}s (>=5%): {result['total_gap_ups']}")
                 print(f"Retraced to VWAP: {result['retraced_to_vwap']}")
                 print(f"Retracement rate: {result['retracement_rate']:.1f}%")
                 
                 # Print top gap-ups for this date
                 if result['details']:
-                    print("\nTop gap-ups:")
+                    print(f"\nTop gap-{args.gap_mode}s:")
                     for detail in sorted(result['details'], key=lambda x: x['gap_percent'], reverse=True)[:5]:
                         retraced_text = "✓" if detail['retraced_to_vwap'] else "✗"
                         days_text = f" ({detail['days_to_retrace']} days)" if detail['days_to_retrace'] is not None else ""
@@ -593,7 +641,7 @@ def main():
         print("\n" + "=" * 80)
         print("OVERALL SUMMARY")
         print("=" * 80)
-        print(f"Total gap-ups analyzed: {total_gap_ups}")
+        print(f"Total gap-{args.gap_mode}s analyzed: {total_gap_ups}")
         print(f"Total that retraced to VWAP: {total_retraced}")
         print(f"Overall retracement rate: {overall_rate:.1f}%")
         print(f"\nDetailed results saved to: output.csv")
