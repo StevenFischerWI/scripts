@@ -65,6 +65,18 @@ TEMPLATE = """<!doctype html>
   </div>
 
   <div class="section">
+    <h2>Win rate vs gap size</h2>
+    {{ fig_gap_win_5|safe }}
+    {{ fig_gap_win_10|safe }}
+  </div>
+
+  <div class="section">
+    <h2>Win rate vs distance to AVWAP</h2>
+    {{ fig_avwap_win_5|safe }}
+    {{ fig_avwap_win_10|safe }}
+  </div>
+
+  <div class="section">
     <h2>Gap size vs 10d retrace %</h2>
     {{ fig_scatter|safe }}
   </div>
@@ -304,6 +316,71 @@ def build_report(csv_path: str, out_path: str) -> None:
     else:
         fig_bucket = px.scatter(title='No bucket data')
 
+    # Win rate vs gap size (5d and 10d)
+    if 'gap_up_percent' in df.columns and (retraced5_col or retraced10_col):
+        dfw = df.copy()
+        # Prepare win columns
+        if retraced5_col:
+            dfw['win5'] = pd.to_numeric(dfw[retraced5_col], errors='coerce').fillna(0).astype(float)
+        if retraced10_col:
+            dfw['win10'] = pd.to_numeric(dfw[retraced10_col], errors='coerce').fillna(0).astype(float)
+        dfw['gap_bucket'] = pd.cut(dfw['gap_up_percent'], bins=bins, labels=labels, right=False)
+        gb = dfw.dropna(subset=['gap_bucket']).groupby('gap_bucket', observed=False)
+        if retraced5_col:
+            gap_win_5 = (gb['win5'].mean().reset_index(name='rate'))
+            gap_win_5['rate'] = 100 * gap_win_5['rate']
+            fig_gap_win_5 = px.bar(gap_win_5, x='gap_bucket', y='rate', title='Win rate vs gap size (5d, %)')
+        else:
+            fig_gap_win_5 = px.scatter(title='Win rate vs gap size (5d unavailable)')
+        if retraced10_col:
+            gap_win_10 = (gb['win10'].mean().reset_index(name='rate'))
+            gap_win_10['rate'] = 100 * gap_win_10['rate']
+            fig_gap_win_10 = px.bar(gap_win_10, x='gap_bucket', y='rate', title='Win rate vs gap size (10d, %)')
+        else:
+            fig_gap_win_10 = px.scatter(title='Win rate vs gap size (10d unavailable)')
+    else:
+        import plotly.graph_objects as go
+        fig_gap_win_5 = go.Figure().update_layout(title='Win rate vs gap size (5d) — no data')
+        fig_gap_win_10 = go.Figure().update_layout(title='Win rate vs gap size (10d) — no data')
+
+    # Win rate vs distance to AVWAP (5d and 10d)
+    if all(col in df.columns for col in ['anchored_vwap', 'open_price']) and (retraced5_col or retraced10_col):
+        dfv = df.copy()
+        # Use per-row direction if available, else infer from filename direction variable
+        if 'direction' in dfv.columns:
+            dir_series = dfv['direction'].astype(str).str.lower()
+            dist = np.where(dir_series == 'short', dfv['open_price'] - dfv['anchored_vwap'],
+                            dfv['anchored_vwap'] - dfv['open_price'])
+        else:
+            if direction == 'short':
+                dist = dfv['open_price'] - dfv['anchored_vwap']
+            else:
+                dist = dfv['anchored_vwap'] - dfv['open_price']
+        dfv['dist_pct'] = 100.0 * (pd.to_numeric(dist, errors='coerce')) / pd.to_numeric(dfv['open_price'], errors='coerce')
+        dfv['dist_pct'] = dfv['dist_pct'].clip(lower=0)
+        dist_bins = [0, 1, 2, 3, 5, 8, 12, 20, 1000]
+        dist_labels = ['0–1', '1–2', '2–3', '3–5', '5–8', '8–12', '12–20', '20%+']
+        dfv['dist_bucket'] = pd.cut(dfv['dist_pct'], bins=dist_bins, labels=dist_labels, right=False)
+        gv = dfv.dropna(subset=['dist_bucket']).groupby('dist_bucket', observed=False)
+        if retraced5_col:
+            dfv['win5'] = pd.to_numeric(dfv[retraced5_col], errors='coerce').fillna(0).astype(float)
+            avwap_win_5 = (gv['win5'].mean().reset_index(name='rate'))
+            avwap_win_5['rate'] = 100 * avwap_win_5['rate']
+            fig_avwap_win_5 = px.bar(avwap_win_5, x='dist_bucket', y='rate', title='Win rate vs distance to AVWAP (5d, %)')
+        else:
+            fig_avwap_win_5 = px.scatter(title='Win rate vs distance to AVWAP (5d unavailable)')
+        if retraced10_col:
+            dfv['win10'] = pd.to_numeric(dfv[retraced10_col], errors='coerce').fillna(0).astype(float)
+            avwap_win_10 = (gv['win10'].mean().reset_index(name='rate'))
+            avwap_win_10['rate'] = 100 * avwap_win_10['rate']
+            fig_avwap_win_10 = px.bar(avwap_win_10, x='dist_bucket', y='rate', title='Win rate vs distance to AVWAP (10d, %)')
+        else:
+            fig_avwap_win_10 = px.scatter(title='Win rate vs distance to AVWAP (10d unavailable)')
+    else:
+        import plotly.graph_objects as go
+        fig_avwap_win_5 = go.Figure().update_layout(title='Win rate vs distance to AVWAP (5d) — no data')
+        fig_avwap_win_10 = go.Figure().update_layout(title='Win rate vs distance to AVWAP (10d) — no data')
+
     # Gap vs retrace scatter (10d)
     ycol = 'retrace_percentage_10d' if 'retrace_percentage_10d' in df.columns else None
     color_col = retraced10_col
@@ -357,6 +434,10 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_monthly_10=fig_monthly_10.to_html(include_plotlyjs=False, full_html=False),
         fig_gap_hist=fig_gap_hist.to_html(include_plotlyjs=False, full_html=False),
         fig_bucket=fig_bucket.to_html(include_plotlyjs=False, full_html=False),
+        fig_gap_win_5=fig_gap_win_5.to_html(include_plotlyjs=False, full_html=False),
+        fig_gap_win_10=fig_gap_win_10.to_html(include_plotlyjs=False, full_html=False),
+        fig_avwap_win_5=fig_avwap_win_5.to_html(include_plotlyjs=False, full_html=False),
+        fig_avwap_win_10=fig_avwap_win_10.to_html(include_plotlyjs=False, full_html=False),
         fig_scatter=fig_scatter.to_html(include_plotlyjs=False, full_html=False),
         fig_spy=fig_spy.to_html(include_plotlyjs=False, full_html=False),
         top_mfe=top_html
