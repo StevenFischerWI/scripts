@@ -59,7 +59,7 @@ TEMPLATE = """<!doctype html>
 
   <div class="section" id="performance">
     <h2>Performance summary</h2>
-    <p>Overall win rate: {{ overall_win_rate }}% &nbsp;|&nbsp; Profit factor: {{ overall_profit_factor }}</p>
+    <p>Overall win rate: 5d: {{ overall_win_rate_5d }}% | 10d: {{ overall_win_rate_10d }}% &nbsp;|&nbsp; Profit factor: 5d: {{ overall_profit_factor_5d }} | 10d: {{ overall_profit_factor_10d }}</p>
     <p>Gap closure rate: 5d: {{ gap_close_rate_5d }}% &nbsp;|&nbsp; 10d: {{ gap_close_rate_10d }}%</p>
     <h3>5-day performance by year</h3>
     {{ perf_table_5|safe }}
@@ -236,28 +236,45 @@ def build_report(csv_path: str, out_path: str) -> None:
         gap_close_rate_10d = f"{(100.0 * df['gap_closed_10d'].mean()):.2f}"
 
     # Build fractional retrace columns for PF computation
-    if retrace_pct_10_col:
-        df['retrace_frac_10d'] = pd.to_numeric(df[retrace_pct_10_col], errors='coerce') / 100.0
-        df['retrace_frac_10d'] = df['retrace_frac_10d'].clip(lower=0.0, upper=1.0).fillna(0.0)
-        profit_units_total = float(df['retrace_frac_10d'].sum())
-        loss_units_total = float((1.0 - df['retrace_frac_10d']).sum())
-        overall_profit_factor = ("∞" if profit_units_total > 0 and loss_units_total == 0
-                                 else (f"{(profit_units_total / loss_units_total):.2f}" if loss_units_total > 0 else "0.00"))
-    else:
-        df['retrace_frac_10d'] = np.nan
-        overall_profit_factor = "n/a"
-
     if retrace_pct_5_col:
         df['retrace_frac_5d'] = pd.to_numeric(df[retrace_pct_5_col], errors='coerce') / 100.0
         df['retrace_frac_5d'] = df['retrace_frac_5d'].clip(lower=0.0, upper=1.0).fillna(0.0)
     else:
         df['retrace_frac_5d'] = np.nan
 
-    # Overall win rate (10d-based to match prior behavior)
-    if win_col_10 and win_col_10 in df.columns and len(df) > 0:
-        overall_win_rate = f"{(100.0 * pd.to_numeric(df[win_col_10], errors='coerce').fillna(0).astype(float).mean()):.2f}"
+    if retrace_pct_10_col:
+        df['retrace_frac_10d'] = pd.to_numeric(df[retrace_pct_10_col], errors='coerce') / 100.0
+        df['retrace_frac_10d'] = df['retrace_frac_10d'].clip(lower=0.0, upper=1.0).fillna(0.0)
     else:
-        overall_win_rate = "n/a"
+        df['retrace_frac_10d'] = np.nan
+
+    # Overall win rates (5d and 10d)
+    if win_col_5 and win_col_5 in df.columns and len(df) > 0:
+        overall_win_rate_5d = f"{(100.0 * pd.to_numeric(df[win_col_5], errors='coerce').fillna(0).astype(float).mean()):.2f}"
+    else:
+        overall_win_rate_5d = "n/a"
+    
+    if win_col_10 and win_col_10 in df.columns and len(df) > 0:
+        overall_win_rate_10d = f"{(100.0 * pd.to_numeric(df[win_col_10], errors='coerce').fillna(0).astype(float).mean()):.2f}"
+    else:
+        overall_win_rate_10d = "n/a"
+    
+    # Overall profit factors (5d and 10d)
+    if retrace_pct_5_col and retrace_pct_5_col in df.columns and len(df) > 0:
+        profit_units_5d = float(df['retrace_frac_5d'].sum())
+        loss_units_5d = float((1.0 - df['retrace_frac_5d']).sum())
+        overall_profit_factor_5d = ("∞" if profit_units_5d > 0 and loss_units_5d == 0
+                                   else (f"{(profit_units_5d / loss_units_5d):.2f}" if loss_units_5d > 0 else "0.00"))
+    else:
+        overall_profit_factor_5d = "n/a"
+    
+    if retrace_pct_10_col:
+        profit_units_total = float(df['retrace_frac_10d'].sum())
+        loss_units_total = float((1.0 - df['retrace_frac_10d']).sum())
+        overall_profit_factor_10d = ("∞" if profit_units_total > 0 and loss_units_total == 0
+                                    else (f"{(profit_units_total / loss_units_total):.2f}" if loss_units_total > 0 else "0.00"))
+    else:
+        overall_profit_factor_10d = "n/a"
 
     # Yearly segmentation tables for 5d and 10d
     if 'date' in df.columns and not df['date'].isna().all():
@@ -699,8 +716,10 @@ def build_report(csv_path: str, out_path: str) -> None:
         nrows=len(df),
         ndates=df['date'].nunique() if 'date' in df.columns else 'n/a',
         direction=direction,
-        overall_win_rate=overall_win_rate,
-        overall_profit_factor=overall_profit_factor,
+        overall_win_rate_5d=overall_win_rate_5d,
+        overall_win_rate_10d=overall_win_rate_10d,
+        overall_profit_factor_5d=overall_profit_factor_5d,
+        overall_profit_factor_10d=overall_profit_factor_10d,
         gap_close_rate_5d=gap_close_rate_5d,
         gap_close_rate_10d=gap_close_rate_10d,
         perf_table_5=perf_table_5_html,
