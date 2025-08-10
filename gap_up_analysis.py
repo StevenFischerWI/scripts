@@ -373,7 +373,7 @@ def get_available_dates(conn, start_date: str = None, end_date: str = None) -> L
     SELECT DISTINCT date 
     FROM candle 
     WHERE date >= %s AND date <= %s
-    ORDER BY date DESC
+    ORDER BY date ASC
     """
     
     df = pd.read_sql_query(query, conn, params=(start_date, end_date))
