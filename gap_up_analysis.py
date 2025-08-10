@@ -310,117 +310,151 @@ def get_spy_daily_gain(conn, gap_date: str) -> float:
 
 def calculate_21_ema(conn, symbol: str, gap_date: str) -> float:
     """Calculate 21-period EMA up to gap date."""
-    query = """
-    SELECT close, date
-    FROM candle 
-    WHERE symbol = %s AND date <= %s
-    ORDER BY date DESC
-    LIMIT 50
-    """
-    df = pd.read_sql_query(query, conn, params=(symbol, gap_date))
-    if len(df) < 21:
+    try:
+        query = """
+        SELECT close, date
+        FROM candle 
+        WHERE symbol = %s AND date <= %s
+        ORDER BY date DESC
+        LIMIT 50
+        """
+        df = pd.read_sql_query(query, conn, params=(symbol, gap_date))
+        if len(df) < 21:
+            return None
+        
+        # Sort by date ascending for EMA calculation
+        df = df.sort_values('date')
+        ema = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
+        return float(ema)
+    except Exception as e:
+        logging.debug(f"Error calculating 21 EMA for {symbol}: {e}")
         return None
-    
-    # Sort by date ascending for EMA calculation
-    df = df.sort_values('date')
-    ema = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
-    return float(ema)
 
 def get_multiple_sma_distances(conn, symbol: str, gap_date: str, close_price: float) -> Dict[str, float]:
     """Get distances from 21, 50, 100, 200 SMAs."""
     periods = [21, 50, 100, 200]
     distances = {}
     
-    for period in periods:
-        query = """
-        SELECT close
-        FROM candle 
-        WHERE symbol = %s AND date <= %s
-        ORDER BY date DESC
-        LIMIT %s
-        """
-        df = pd.read_sql_query(query, conn, params=(symbol, gap_date, period))
+    try:
+        for period in periods:
+            query = """
+            SELECT close
+            FROM candle 
+            WHERE symbol = %s AND date <= %s
+            ORDER BY date DESC
+            LIMIT %s
+            """
+            try:
+                df = pd.read_sql_query(query, conn, params=(symbol, gap_date, period))
+                
+                if len(df) >= period:
+                    sma = df['close'].mean()
+                    distance_pct = ((close_price - sma) / sma) * 100 if sma > 0 else None
+                    distances[f'sma_{period}_distance_percent'] = distance_pct
+                else:
+                    distances[f'sma_{period}_distance_percent'] = None
+            except Exception as e:
+                logging.debug(f"Error calculating SMA-{period} for {symbol}: {e}")
+                distances[f'sma_{period}_distance_percent'] = None
         
-        if len(df) >= period:
-            sma = df['close'].mean()
-            distance_pct = ((close_price - sma) / sma) * 100 if sma > 0 else None
-            distances[f'sma_{period}_distance_percent'] = distance_pct
-        else:
-            distances[f'sma_{period}_distance_percent'] = None
-    
-    return distances
+        return distances
+    except Exception as e:
+        logging.debug(f"Error in get_multiple_sma_distances for {symbol}: {e}")
+        return {
+            'sma_21_distance_percent': None,
+            'sma_50_distance_percent': None,
+            'sma_100_distance_percent': None,
+            'sma_200_distance_percent': None
+        }
 
 def get_quarterly_avwap_distances(conn, symbol: str, gap_date: str, close_price: float) -> Dict[str, float]:
     """Get distances from quarterly AVWAPs (current quarter, 2Q ago, 3Q ago, 1Y ago)."""
-    gap_date_dt = datetime.strptime(gap_date, '%Y-%m-%d')
-    distances = {}
-    
-    # Define quarter start dates
-    current_quarter_start = datetime(gap_date_dt.year, ((gap_date_dt.month - 1) // 3) * 3 + 1, 1)
-    
-    quarters = {
-        'current': current_quarter_start,
-        '2q_ago': current_quarter_start - timedelta(days=180),  # Approx 2 quarters
-        '3q_ago': current_quarter_start - timedelta(days=270),  # Approx 3 quarters  
-        '1y_ago': current_quarter_start - timedelta(days=365)   # 1 year ago
-    }
-    
-    for period_name, quarter_start in quarters.items():
-        quarter_start_str = quarter_start.strftime('%Y-%m-%d')
+    try:
+        gap_date_dt = datetime.strptime(gap_date, '%Y-%m-%d')
+        distances = {}
         
-        query = """
-        SELECT high, low, close, COALESCE(volume, 0) as volume
-        FROM candle 
-        WHERE symbol = %s 
-        AND date >= %s 
-        AND date <= %s
-        ORDER BY date
-        """
+        # Define quarter start dates
+        current_quarter_start = datetime(gap_date_dt.year, ((gap_date_dt.month - 1) // 3) * 3 + 1, 1)
         
-        df = pd.read_sql_query(query, conn, params=(symbol, quarter_start_str, gap_date))
+        quarters = {
+            'current': current_quarter_start,
+            '2q_ago': current_quarter_start - timedelta(days=180),  # Approx 2 quarters
+            '3q_ago': current_quarter_start - timedelta(days=270),  # Approx 3 quarters  
+            '1y_ago': current_quarter_start - timedelta(days=365)   # 1 year ago
+        }
         
-        if not df.empty:
-            avwap = calculate_vwap(df)
-            if avwap > 0:
-                distance_pct = ((close_price - avwap) / avwap) * 100
-                distances[f'avwap_{period_name}_distance_percent'] = distance_pct
-            else:
+        for period_name, quarter_start in quarters.items():
+            quarter_start_str = quarter_start.strftime('%Y-%m-%d')
+            
+            query = """
+            SELECT high, low, close, COALESCE(volume, 0) as volume
+            FROM candle 
+            WHERE symbol = %s 
+            AND date >= %s 
+            AND date <= %s
+            ORDER BY date
+            """
+            
+            try:
+                df = pd.read_sql_query(query, conn, params=(symbol, quarter_start_str, gap_date))
+                
+                if not df.empty:
+                    avwap = calculate_vwap(df)
+                    if avwap > 0:
+                        distance_pct = ((close_price - avwap) / avwap) * 100
+                        distances[f'avwap_{period_name}_distance_percent'] = distance_pct
+                    else:
+                        distances[f'avwap_{period_name}_distance_percent'] = None
+                else:
+                    distances[f'avwap_{period_name}_distance_percent'] = None
+            except Exception as e:
+                logging.debug(f"Error calculating quarterly AVWAP for {symbol} {period_name}: {e}")
                 distances[f'avwap_{period_name}_distance_percent'] = None
-        else:
-            distances[f'avwap_{period_name}_distance_percent'] = None
-    
-    return distances
+        
+        return distances
+    except Exception as e:
+        logging.debug(f"Error in get_quarterly_avwap_distances for {symbol}: {e}")
+        return {
+            'avwap_current_distance_percent': None,
+            'avwap_2q_ago_distance_percent': None,
+            'avwap_3q_ago_distance_percent': None,
+            'avwap_1y_ago_distance_percent': None
+        }
 
 def check_21ema_retracement(conn, symbol: str, gap_date: str, ema_21: float, gap_mode: str, days_to_check: int = 10) -> Tuple[bool, Optional[int]]:
     """Check if stock retraced to 21 EMA within specified days."""
     if ema_21 is None:
         return False, None
+    
+    try:
+        end_date = (datetime.strptime(gap_date, '%Y-%m-%d') + timedelta(days=days_to_check)).strftime('%Y-%m-%d')
         
-    end_date = (datetime.strptime(gap_date, '%Y-%m-%d') + timedelta(days=days_to_check)).strftime('%Y-%m-%d')
-    
-    query = """
-    SELECT date, high, low,
-           ROW_NUMBER() OVER (ORDER BY date ASC) AS rn
-    FROM candle 
-    WHERE symbol = %s 
-    AND date > %s 
-    AND date <= %s
-    ORDER BY date
-    """
-    
-    df = pd.read_sql_query(query, conn, params=(symbol, gap_date, end_date))
-    
-    if df.empty:
+        query = """
+        SELECT date, high, low,
+               ROW_NUMBER() OVER (ORDER BY date ASC) AS rn
+        FROM candle 
+        WHERE symbol = %s 
+        AND date > %s 
+        AND date <= %s
+        ORDER BY date
+        """
+        
+        df = pd.read_sql_query(query, conn, params=(symbol, gap_date, end_date))
+        
+        if df.empty:
+            return False, None
+        
+        # Check each day to find when it first retraced to 21 EMA
+        for _, row in df.iterrows():
+            if gap_mode == 'up' and row['low'] <= ema_21:
+                return True, int(row['rn'])
+            elif gap_mode == 'down' and row['high'] >= ema_21:
+                return True, int(row['rn'])
+        
         return False, None
-    
-    # Check each day to find when it first retraced to 21 EMA
-    for _, row in df.iterrows():
-        if gap_mode == 'up' and row['low'] <= ema_21:
-            return True, int(row['rn'])
-        elif gap_mode == 'down' and row['high'] >= ema_21:
-            return True, int(row['rn'])
-    
-    return False, None
+    except Exception as e:
+        logging.debug(f"Error checking 21 EMA retracement for {symbol}: {e}")
+        return False, None
 
 def analyze_gap_ups_for_date(conn, date: str, csv_writer, gap_mode: str = 'up') -> Dict:
     """Analyze gap-ups for a specific date and write results to CSV."""
