@@ -82,6 +82,17 @@ TEMPLATE = """<!doctype html>
   </div>
 
   <div class="section">
+    <h2>Win rate: above vs below 330-SMA</h2>
+    {{ fig_sma330_above_below|safe }}
+  </div>
+
+  <div class="section">
+    <h2>Win rate by distance to 330-SMA</h2>
+    {{ fig_sma330_bucket_5|safe }}
+    {{ fig_sma330_bucket_10|safe }}
+  </div>
+
+  <div class="section">
     <h2>Gap size vs 10d retrace %</h2>
     {{ fig_scatter|safe }}
   </div>
@@ -403,6 +414,64 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_avwap_win_5 = go.Figure().update_layout(title='Win rate vs distance to AVWAP (5d) — no data')
         fig_avwap_win_10 = go.Figure().update_layout(title='Win rate vs distance to AVWAP (10d) — no data')
 
+    # Win rate vs 330-SMA (above/below) and by distance buckets
+    if 'sma_330_distance_percent' in df.columns and (retraced5_col or retraced10_col):
+        dfx = df.copy()
+        dfx['sma_dist'] = pd.to_numeric(dfx['sma_330_distance_percent'], errors='coerce')
+        dfx = dfx.dropna(subset=['sma_dist'])
+        if retraced5_col:
+            dfx['win5'] = pd.to_numeric(dfx[retraced5_col], errors='coerce').fillna(0).astype(float)
+        if retraced10_col:
+            dfx['win10'] = pd.to_numeric(dfx[retraced10_col], errors='coerce').fillna(0).astype(float)
+
+        # Above vs Below 330-SMA
+        dfx['above_below'] = np.where(dfx['sma_dist'] >= 0, 'Above 330-SMA', 'Below 330-SMA')
+        parts = []
+        gb_ab = dfx.groupby('above_below', observed=False)
+        if retraced5_col:
+            r5 = gb_ab['win5'].mean().reset_index(name='rate')
+            r5['horizon'] = '5d'
+            parts.append(r5)
+        if retraced10_col:
+            r10 = gb_ab['win10'].mean().reset_index(name='rate')
+            r10['horizon'] = '10d'
+            parts.append(r10)
+        if parts:
+            ab_long = pd.concat(parts, ignore_index=True)
+            ab_long['rate'] = 100 * ab_long['rate']
+            fig_sma330_above_below = px.bar(
+                ab_long, x='above_below', y='rate', color='horizon', barmode='group',
+                title='Win rate: above vs below 330-SMA (%)'
+            )
+        else:
+            fig_sma330_above_below = px.scatter(title='Win rate: above vs below 330-SMA (n/a)')
+
+        # Buckets by signed distance to 330-SMA
+        bins = [-1000, -20, -12, -8, -5, -3, -1, 0, 1, 3, 5, 8, 12, 20, 1000]
+        labels = ['<=-20', '-20–-12', '-12–-8', '-8–-5', '-5–-3', '-3–-1', '-1–0',
+                  '0–1', '1–3', '3–5', '5–8', '8–12', '12–20', '>=20']
+        dfx['sma_bucket'] = pd.cut(dfx['sma_dist'], bins=bins, labels=labels, right=False, include_lowest=True)
+        gv = dfx.dropna(subset=['sma_bucket']).groupby('sma_bucket', observed=False)
+        if retraced5_col:
+            b5 = gv['win5'].mean().reset_index(name='rate')
+            b5['rate'] = 100 * b5['rate']
+            fig_sma330_bucket_5 = px.bar(b5, x='sma_bucket', y='rate',
+                                         title='Win rate vs distance to 330-SMA (5d, %)')
+        else:
+            fig_sma330_bucket_5 = px.scatter(title='Win rate vs distance to 330-SMA (5d unavailable)')
+        if retraced10_col:
+            b10 = gv['win10'].mean().reset_index(name='rate')
+            b10['rate'] = 100 * b10['rate']
+            fig_sma330_bucket_10 = px.bar(b10, x='sma_bucket', y='rate',
+                                          title='Win rate vs distance to 330-SMA (10d, %)')
+        else:
+            fig_sma330_bucket_10 = px.scatter(title='Win rate vs distance to 330-SMA (10d unavailable)')
+    else:
+        import plotly.graph_objects as go
+        fig_sma330_above_below = px.scatter(title='Win rate: above vs below 330-SMA (no data)')
+        fig_sma330_bucket_5 = px.scatter(title='Win rate vs distance to 330-SMA (5d) — no data')
+        fig_sma330_bucket_10 = px.scatter(title='Win rate vs distance to 330-SMA (10d) — no data')
+
     # Gap vs retrace scatter (10d)
     ycol = 'retrace_percentage_10d' if 'retrace_percentage_10d' in df.columns else None
     color_col = retraced10_col
@@ -461,6 +530,9 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_gap_win_10=fig_gap_win_10.to_html(include_plotlyjs=False, full_html=False),
         fig_avwap_win_5=fig_avwap_win_5.to_html(include_plotlyjs=False, full_html=False),
         fig_avwap_win_10=fig_avwap_win_10.to_html(include_plotlyjs=False, full_html=False),
+        fig_sma330_above_below=fig_sma330_above_below.to_html(include_plotlyjs=False, full_html=False),
+        fig_sma330_bucket_5=fig_sma330_bucket_5.to_html(include_plotlyjs=False, full_html=False),
+        fig_sma330_bucket_10=fig_sma330_bucket_10.to_html(include_plotlyjs=False, full_html=False),
         fig_scatter=fig_scatter.to_html(include_plotlyjs=False, full_html=False),
         fig_spy=fig_spy.to_html(include_plotlyjs=False, full_html=False),
         top_mfe=top_html
