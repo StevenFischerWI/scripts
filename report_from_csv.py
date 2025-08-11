@@ -791,7 +791,7 @@ def build_report(csv_path: str, out_path: str) -> None:
         ema_21_retrace_rate_10d=ema_21_retrace_rate_10d,
         perf_table_5=perf_table_5_html,
         perf_table_10=perf_table_10_html,
-        fig_monthly_5=fig_monthly_5.to_html(include_plotlyjs=False, full_html=False),
+        fig_monthly_5=fig_monthly_5.to_html(include_plotlyjs='cdn', full_html=False),
         fig_monthly_10=fig_monthly_10.to_html(include_plotlyjs=False, full_html=False),
         fig_monthly_both=fig_monthly_both.to_html(include_plotlyjs=False, full_html=False),
         fig_gap_hist=fig_gap_hist.to_html(include_plotlyjs=False, full_html=False),
