@@ -570,8 +570,8 @@ def build_report(csv_path: str, out_path: str) -> None:
 
     # Buckets and rates (10d)
     if 'gap_up_percent' in df.columns and retraced10_col:
-        bins = [5, 7.5, 10, 15, 25, 50, 100]
-        labels = ['5–7.5', '7.5–10', '10–15', '15–25', '25–50', '50–100']
+        bins = [2, 3, 4, 5, 7.5, 10, 15, 25, 50, 100]
+        labels = ['2–3', '3–4', '4–5', '5–7.5', '7.5–10', '10–15', '15–25', '25–50', '50–100']
         dfb = df.copy()
         dfb['gap_bucket'] = pd.cut(dfb['gap_up_percent'], bins=bins, labels=labels, right=False)
         bucket = (dfb.dropna(subset=['gap_bucket'])
@@ -598,6 +598,9 @@ def build_report(csv_path: str, out_path: str) -> None:
             dfw['win5'] = pd.to_numeric(dfw[retraced5_col], errors='coerce').fillna(0).astype(float)
         if retraced10_col:
             dfw['win10'] = pd.to_numeric(dfw[retraced10_col], errors='coerce').fillna(0).astype(float)
+        # Use updated bins that start from 2%
+        bins = [2, 3, 4, 5, 7.5, 10, 15, 25, 50, 100]
+        labels = ['2–3', '3–4', '4–5', '5–7.5', '7.5–10', '10–15', '15–25', '25–50', '50–100']
         dfw['gap_bucket'] = pd.cut(dfw['gap_up_percent'], bins=bins, labels=labels, right=False)
         gb = dfw.dropna(subset=['gap_bucket']).groupby('gap_bucket', observed=False)
         if retraced5_col:
