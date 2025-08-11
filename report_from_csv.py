@@ -43,6 +43,7 @@ TEMPLATE = """<!doctype html>
     <h2>Table of Contents</h2>
     <ul>
       <li><a href="#performance">Performance summary</a></li>
+      <li><a href="#performance-gap-size">Performance by gap size</a></li>
       <li><a href="#monthly-win">Monthly win rates</a></li>
       <li><a href="#monthly-comparison">Monthly win rate (5d vs 10d)</a></li>
       <li><a href="#gap-distribution">Gap size distribution</a></li>
@@ -77,6 +78,14 @@ TEMPLATE = """<!doctype html>
     <div class="table-container">{{ perf_table_5|safe }}</div>
     <h3>10-day performance by year</h3>
     <div class="table-container">{{ perf_table_10|safe }}</div>
+  </div>
+
+  <div class="section" id="performance-gap-size">
+    <h2>Performance by gap size</h2>
+    <h3>5-day performance by gap size</h3>
+    <div class="table-container">{{ perf_gap_table_5|safe }}</div>
+    <h3>10-day performance by gap size</h3>
+    <div class="table-container">{{ perf_gap_table_10|safe }}</div>
     <script>
     // Add column group styling after tables are rendered
     document.addEventListener('DOMContentLoaded', function() {
@@ -478,6 +487,128 @@ def build_report(csv_path: str, out_path: str) -> None:
     else:
         perf_table_5_html = pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF']).to_html(index=False, classes='perf-table')
         perf_table_10_html = pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF']).to_html(index=False, classes='perf-table')
+
+    # Performance by gap size tables
+    if 'gap_up_percent' in df.columns and not df.empty:
+        # Define gap size buckets
+        gap_bins = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 100]
+        gap_labels = ['2-3%', '3-4%', '4-5%', '5-6%', '6-7%', '7-8%', '8-9%', '9-10%', '10-12%', '12-15%', '15-20%', '20%+']
+        
+        df_gap = df.copy()
+        df_gap['gap_bucket'] = pd.cut(df_gap['gap_up_percent'], bins=gap_bins, labels=gap_labels, right=False)
+        
+        # 5-day performance by gap size
+        rows_gap_5 = []
+        for bucket, g in df_gap.groupby('gap_bucket', observed=False):
+            if pd.isna(bucket):
+                continue
+            trades = int(len(g))
+            
+            # AVWAP retrace rate and profit factor
+            if win_col_5 and win_col_5 in g.columns and trades > 0:
+                avwap_rate_5 = 100.0 * pd.to_numeric(g[win_col_5], errors='coerce').fillna(0).astype(float).mean()
+            else:
+                avwap_rate_5 = np.nan
+            if 'retrace_frac_5d' in g.columns and not g['retrace_frac_5d'].isna().all():
+                p5 = float(g['retrace_frac_5d'].sum())
+                l5 = float((1.0 - g['retrace_frac_5d']).sum())
+                avwap_pf_5 = np.inf if p5 > 0 and l5 == 0 else (p5 / l5 if l5 > 0 else np.nan)
+            else:
+                avwap_pf_5 = np.nan
+
+            # Gap closure rate and profit factor
+            gap_filled_5d_col = 'gap_filled_5d' if 'gap_filled_5d' in g.columns else None
+            if gap_filled_5d_col and trades > 0:
+                gap_closed_5 = pd.to_numeric(g[gap_filled_5d_col], errors='coerce').fillna(0).astype(bool)
+                gap_rate_5 = 100.0 * gap_closed_5.mean()
+                gap_wins_5 = gap_closed_5.sum()
+                gap_losses_5 = trades - gap_wins_5
+                gap_pf_5 = np.inf if gap_wins_5 > 0 and gap_losses_5 == 0 else (gap_wins_5 / gap_losses_5 if gap_losses_5 > 0 else np.nan)
+            else:
+                gap_rate_5 = np.nan
+                gap_pf_5 = np.nan
+
+            # 21 EMA retrace rate and profit factor
+            if 'retraced_to_21ema_5d' in g.columns and trades > 0:
+                ema_rate_5 = 100.0 * pd.to_numeric(g['retraced_to_21ema_5d'], errors='coerce').fillna(0).astype(float).mean()
+                ema_wins_5 = pd.to_numeric(g['retraced_to_21ema_5d'], errors='coerce').fillna(0).astype(float).sum()
+                ema_losses_5 = trades - ema_wins_5
+                ema_pf_5 = np.inf if ema_wins_5 > 0 and ema_losses_5 == 0 else (ema_wins_5 / ema_losses_5 if ema_losses_5 > 0 else np.nan)
+            else:
+                ema_rate_5 = np.nan
+                ema_pf_5 = np.nan
+
+            rows_gap_5.append({
+                'Gap Size': str(bucket),
+                'Trades': trades,
+                'AVWAP %': round(avwap_rate_5, 2) if pd.notna(avwap_rate_5) else np.nan,
+                'AVWAP PF': (round(avwap_pf_5, 2) if np.isfinite(avwap_pf_5) else (np.nan if np.isnan(avwap_pf_5) else np.inf)),
+                'Gap Close %': round(gap_rate_5, 2) if pd.notna(gap_rate_5) else np.nan,
+                'Gap Close PF': (round(gap_pf_5, 2) if np.isfinite(gap_pf_5) else (np.nan if np.isnan(gap_pf_5) else np.inf)),
+                '21EMA %': round(ema_rate_5, 2) if pd.notna(ema_rate_5) else np.nan,
+                '21EMA PF': (round(ema_pf_5, 2) if np.isfinite(ema_pf_5) else (np.nan if np.isnan(ema_pf_5) else np.inf))
+            })
+        
+        perf_gap_df_5 = pd.DataFrame(rows_gap_5) if rows_gap_5 else pd.DataFrame(columns=['Gap Size', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF'])
+        perf_gap_table_5_html = perf_gap_df_5.to_html(index=False, classes='perf-table')
+
+        # 10-day performance by gap size
+        rows_gap_10 = []
+        for bucket, g in df_gap.groupby('gap_bucket', observed=False):
+            if pd.isna(bucket):
+                continue
+            trades = int(len(g))
+            
+            # AVWAP retrace rate and profit factor
+            if win_col_10 and win_col_10 in g.columns and trades > 0:
+                avwap_rate_10 = 100.0 * pd.to_numeric(g[win_col_10], errors='coerce').fillna(0).astype(float).mean()
+            else:
+                avwap_rate_10 = np.nan
+            if 'retrace_frac_10d' in g.columns and not g['retrace_frac_10d'].isna().all():
+                p10 = float(g['retrace_frac_10d'].sum())
+                l10 = float((1.0 - g['retrace_frac_10d']).sum())
+                avwap_pf_10 = np.inf if p10 > 0 and l10 == 0 else (p10 / l10 if l10 > 0 else np.nan)
+            else:
+                avwap_pf_10 = np.nan
+
+            # Gap closure rate and profit factor
+            gap_filled_10d_col = 'gap_filled_10d' if 'gap_filled_10d' in g.columns else None
+            if gap_filled_10d_col and trades > 0:
+                gap_closed_10 = pd.to_numeric(g[gap_filled_10d_col], errors='coerce').fillna(0).astype(bool)
+                gap_rate_10 = 100.0 * gap_closed_10.mean()
+                gap_wins_10 = gap_closed_10.sum()
+                gap_losses_10 = trades - gap_wins_10
+                gap_pf_10 = np.inf if gap_wins_10 > 0 and gap_losses_10 == 0 else (gap_wins_10 / gap_losses_10 if gap_losses_10 > 0 else np.nan)
+            else:
+                gap_rate_10 = np.nan
+                gap_pf_10 = np.nan
+
+            # 21 EMA retrace rate and profit factor
+            if 'retraced_to_21ema_10d' in g.columns and trades > 0:
+                ema_rate_10 = 100.0 * pd.to_numeric(g['retraced_to_21ema_10d'], errors='coerce').fillna(0).astype(float).mean()
+                ema_wins_10 = pd.to_numeric(g['retraced_to_21ema_10d'], errors='coerce').fillna(0).astype(float).sum()
+                ema_losses_10 = trades - ema_wins_10
+                ema_pf_10 = np.inf if ema_wins_10 > 0 and ema_losses_10 == 0 else (ema_wins_10 / ema_losses_10 if ema_losses_10 > 0 else np.nan)
+            else:
+                ema_rate_10 = np.nan
+                ema_pf_10 = np.nan
+
+            rows_gap_10.append({
+                'Gap Size': str(bucket),
+                'Trades': trades,
+                'AVWAP %': round(avwap_rate_10, 2) if pd.notna(avwap_rate_10) else np.nan,
+                'AVWAP PF': (round(avwap_pf_10, 2) if np.isfinite(avwap_pf_10) else (np.nan if np.isnan(avwap_pf_10) else np.inf)),
+                'Gap Close %': round(gap_rate_10, 2) if pd.notna(gap_rate_10) else np.nan,
+                'Gap Close PF': (round(gap_pf_10, 2) if np.isfinite(gap_pf_10) else (np.nan if np.isnan(gap_pf_10) else np.inf)),
+                '21EMA %': round(ema_rate_10, 2) if pd.notna(ema_rate_10) else np.nan,
+                '21EMA PF': (round(ema_pf_10, 2) if np.isfinite(ema_pf_10) else (np.nan if np.isnan(ema_pf_10) else np.inf))
+            })
+        
+        perf_gap_df_10 = pd.DataFrame(rows_gap_10) if rows_gap_10 else pd.DataFrame(columns=['Gap Size', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF'])
+        perf_gap_table_10_html = perf_gap_df_10.to_html(index=False, classes='perf-table')
+    else:
+        perf_gap_table_5_html = pd.DataFrame(columns=['Gap Size', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF']).to_html(index=False, classes='perf-table')
+        perf_gap_table_10_html = pd.DataFrame(columns=['Gap Size', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF']).to_html(index=False, classes='perf-table')
 
     # Charts (changed to monthly with SMA overlay)
     if not monthly.empty:
@@ -1040,6 +1171,8 @@ def build_report(csv_path: str, out_path: str) -> None:
         ema_21_retrace_rate_10d=ema_21_retrace_rate_10d,
         perf_table_5=perf_table_5_html,
         perf_table_10=perf_table_10_html,
+        perf_gap_table_5=perf_gap_table_5_html,
+        perf_gap_table_10=perf_gap_table_10_html,
         fig_monthly_5=fig_monthly_5.to_html(include_plotlyjs='cdn', full_html=False),
         fig_monthly_10=fig_monthly_10.to_html(include_plotlyjs=False, full_html=False),
         fig_monthly_both=fig_monthly_both.to_html(include_plotlyjs=False, full_html=False),
