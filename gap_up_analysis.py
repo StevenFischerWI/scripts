@@ -473,7 +473,7 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
     """Thread-safe version that returns data instead of writing to CSV directly."""
     logging.debug(f"Analyzing gap-{gap_mode}s for {date}...")
     
-    gap_ups = find_gap_ups(conn, date, gap_mode=gap_mode)
+    gap_ups = find_gap_ups(conn, date, gap_threshold=0.02, gap_mode=gap_mode)
     
     if gap_ups.empty:
         logging.info(f"No gap-{gap_mode}s found for {date}")
