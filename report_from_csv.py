@@ -53,6 +53,10 @@ TEMPLATE = """<!doctype html>
       <li><a href="#win-50ema-above-below">Win rate: above vs below 50-EMA</a></li>
       <li><a href="#win-100ema-above-below">Win rate: above vs below 100-EMA</a></li>
       <li><a href="#win-200ema-above-below">Win rate: above vs below 200-EMA</a></li>
+      <li><a href="#win-avwap-current-above-below">Win rate: above vs below Current Quarter AVWAP</a></li>
+      <li><a href="#win-avwap-2q-above-below">Win rate: above vs below 2Q Ago AVWAP</a></li>
+      <li><a href="#win-avwap-3q-above-below">Win rate: above vs below 3Q Ago AVWAP</a></li>
+      <li><a href="#win-avwap-1y-above-below">Win rate: above vs below 1Y Ago AVWAP</a></li>
       <li><a href="#win-sma330-above-below">Win rate: above vs below 330-SMA</a></li>
       <li><a href="#win-sma330-bucket">Win rate by distance to 330-SMA</a></li>
       <li><a href="#win-spy">Win rate vs SPY daily change</a></li>
@@ -151,6 +155,26 @@ TEMPLATE = """<!doctype html>
   <div class="section" id="win-200ema-above-below">
     <h2>Win rate: above vs below 200-EMA</h2>
     {{ fig_200ema_above_below|safe }}
+  </div>
+
+  <div class="section" id="win-avwap-current-above-below">
+    <h2>Win rate: above vs below Current Quarter AVWAP</h2>
+    {{ fig_avwap_current_above_below|safe }}
+  </div>
+
+  <div class="section" id="win-avwap-2q-above-below">
+    <h2>Win rate: above vs below 2Q Ago AVWAP</h2>
+    {{ fig_avwap_2q_above_below|safe }}
+  </div>
+
+  <div class="section" id="win-avwap-3q-above-below">
+    <h2>Win rate: above vs below 3Q Ago AVWAP</h2>
+    {{ fig_avwap_3q_above_below|safe }}
+  </div>
+
+  <div class="section" id="win-avwap-1y-above-below">
+    <h2>Win rate: above vs below 1Y Ago AVWAP</h2>
+    {{ fig_avwap_1y_above_below|safe }}
   </div>
 
   <div class="section" id="win-sma330-above-below">
@@ -658,6 +682,12 @@ def build_report(csv_path: str, out_path: str) -> None:
     fig_100ema_above_below = create_above_below_chart(df, 'sma_100_distance_percent', '100-EMA', retraced5_col, retraced10_col)
     fig_200ema_above_below = create_above_below_chart(df, 'sma_200_distance_percent', '200-EMA', retraced5_col, retraced10_col)
 
+    # Win rate vs quarterly AVWAPs (above/below)
+    fig_avwap_current_above_below = create_above_below_chart(df, 'avwap_current_distance_percent', 'Current Quarter AVWAP', retraced5_col, retraced10_col)
+    fig_avwap_2q_above_below = create_above_below_chart(df, 'avwap_2q_ago_distance_percent', '2Q Ago AVWAP', retraced5_col, retraced10_col)
+    fig_avwap_3q_above_below = create_above_below_chart(df, 'avwap_3q_ago_distance_percent', '3Q Ago AVWAP', retraced5_col, retraced10_col)
+    fig_avwap_1y_above_below = create_above_below_chart(df, 'avwap_1y_ago_distance_percent', '1Y Ago AVWAP', retraced5_col, retraced10_col)
+
     # Win rate vs 330-SMA (above/below) and by distance buckets
     if 'sma_330_distance_percent' in df.columns and (retraced5_col or retraced10_col):
         dfx = df.copy()
@@ -869,6 +899,10 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_50ema_above_below=fig_50ema_above_below.to_html(include_plotlyjs=False, full_html=False),
         fig_100ema_above_below=fig_100ema_above_below.to_html(include_plotlyjs=False, full_html=False),
         fig_200ema_above_below=fig_200ema_above_below.to_html(include_plotlyjs=False, full_html=False),
+        fig_avwap_current_above_below=fig_avwap_current_above_below.to_html(include_plotlyjs=False, full_html=False),
+        fig_avwap_2q_above_below=fig_avwap_2q_above_below.to_html(include_plotlyjs=False, full_html=False),
+        fig_avwap_3q_above_below=fig_avwap_3q_above_below.to_html(include_plotlyjs=False, full_html=False),
+        fig_avwap_1y_above_below=fig_avwap_1y_above_below.to_html(include_plotlyjs=False, full_html=False),
         fig_sma330_above_below=fig_sma330_above_below.to_html(include_plotlyjs=False, full_html=False),
         fig_sma330_bucket_5=fig_sma330_bucket_5.to_html(include_plotlyjs=False, full_html=False),
         fig_sma330_bucket_10=fig_sma330_bucket_10.to_html(include_plotlyjs=False, full_html=False),
