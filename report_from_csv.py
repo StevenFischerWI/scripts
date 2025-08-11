@@ -30,6 +30,9 @@ TEMPLATE = """<!doctype html>
     .index{background:#f5f5f5;padding:16px;margin:16px 0;border-radius:4px}
     .index ul{margin:0;padding-left:20px}
     .index li{margin:4px 0}
+    .perf-table .avwap-group{background-color:#e8f4fd;}
+    .perf-table .gap-group{background-color:#fff2cc;}
+    .perf-table .ema-group{background-color:#f0f8e8;}
   </style>
 </head>
 <body>
@@ -62,9 +65,35 @@ TEMPLATE = """<!doctype html>
     <p>21 EMA retrace rate: 5d: {{ ema_21_retrace_rate_5d }}% &nbsp;|&nbsp; 10d: {{ ema_21_retrace_rate_10d }}%</p>
     <p>Gap closure rate: 5d: {{ gap_close_rate_5d }}% &nbsp;|&nbsp; 10d: {{ gap_close_rate_10d }}%</p>
     <h3>5-day performance by year</h3>
-    {{ perf_table_5|safe }}
+    <div class="table-container">{{ perf_table_5|safe }}</div>
     <h3>10-day performance by year</h3>
-    {{ perf_table_10|safe }}
+    <div class="table-container">{{ perf_table_10|safe }}</div>
+    <script>
+    // Add column group styling after tables are rendered
+    document.addEventListener('DOMContentLoaded', function() {
+        const tables = document.querySelectorAll('.perf-table');
+        tables.forEach(table => {
+            const headers = table.querySelectorAll('th');
+            const rows = table.querySelectorAll('tbody tr');
+            
+            headers.forEach((header, index) => {
+                const text = header.textContent.trim();
+                let className = '';
+                if (text.includes('AVWAP')) className = 'avwap-group';
+                else if (text.includes('Gap Close')) className = 'gap-group';
+                else if (text.includes('21EMA')) className = 'ema-group';
+                
+                if (className) {
+                    header.classList.add(className);
+                    rows.forEach(row => {
+                        const cell = row.cells[index];
+                        if (cell) cell.classList.add(className);
+                    });
+                }
+            });
+        });
+    });
+    </script>
   </div>
 
   <div class="section" id="monthly-win">
@@ -328,13 +357,13 @@ def build_report(csv_path: str, out_path: str) -> None:
                 'Trades': trades,
                 'AVWAP %': round(avwap_rate_5, 2) if pd.notna(avwap_rate_5) else np.nan,
                 'AVWAP PF': (round(avwap_pf_5, 2) if np.isfinite(avwap_pf_5) else (np.nan if np.isnan(avwap_pf_5) else np.inf)),
-                '21EMA %': round(ema_rate_5, 2) if pd.notna(ema_rate_5) else np.nan,
-                '21EMA PF': (round(ema_pf_5, 2) if np.isfinite(ema_pf_5) else (np.nan if np.isnan(ema_pf_5) else np.inf)),
                 'Gap Close %': round(gap_rate_5, 2) if pd.notna(gap_rate_5) else np.nan,
-                'Gap Close PF': (round(gap_pf_5, 2) if np.isfinite(gap_pf_5) else (np.nan if np.isnan(gap_pf_5) else np.inf))
+                'Gap Close PF': (round(gap_pf_5, 2) if np.isfinite(gap_pf_5) else (np.nan if np.isnan(gap_pf_5) else np.inf)),
+                '21EMA %': round(ema_rate_5, 2) if pd.notna(ema_rate_5) else np.nan,
+                '21EMA PF': (round(ema_pf_5, 2) if np.isfinite(ema_pf_5) else (np.nan if np.isnan(ema_pf_5) else np.inf))
             })
-        perf_df_5 = pd.DataFrame(rows5).sort_values('Year') if rows5 else pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', '21EMA %', '21EMA PF', 'Gap Close %', 'Gap Close PF'])
-        perf_table_5_html = perf_df_5.to_html(index=False)
+        perf_df_5 = pd.DataFrame(rows5).sort_values('Year') if rows5 else pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF'])
+        perf_table_5_html = perf_df_5.to_html(index=False, classes='perf-table', table_id='perf-5d')
 
         # 10d table
         rows10 = []
@@ -381,16 +410,16 @@ def build_report(csv_path: str, out_path: str) -> None:
                 'Trades': trades,
                 'AVWAP %': round(avwap_rate_10, 2) if pd.notna(avwap_rate_10) else np.nan,
                 'AVWAP PF': (round(avwap_pf_10, 2) if np.isfinite(avwap_pf_10) else (np.nan if np.isnan(avwap_pf_10) else np.inf)),
-                '21EMA %': round(ema_rate_10, 2) if pd.notna(ema_rate_10) else np.nan,
-                '21EMA PF': (round(ema_pf_10, 2) if np.isfinite(ema_pf_10) else (np.nan if np.isnan(ema_pf_10) else np.inf)),
                 'Gap Close %': round(gap_rate_10, 2) if pd.notna(gap_rate_10) else np.nan,
-                'Gap Close PF': (round(gap_pf_10, 2) if np.isfinite(gap_pf_10) else (np.nan if np.isnan(gap_pf_10) else np.inf))
+                'Gap Close PF': (round(gap_pf_10, 2) if np.isfinite(gap_pf_10) else (np.nan if np.isnan(gap_pf_10) else np.inf)),
+                '21EMA %': round(ema_rate_10, 2) if pd.notna(ema_rate_10) else np.nan,
+                '21EMA PF': (round(ema_pf_10, 2) if np.isfinite(ema_pf_10) else (np.nan if np.isnan(ema_pf_10) else np.inf))
             })
-        perf_df_10 = pd.DataFrame(rows10).sort_values('Year') if rows10 else pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', '21EMA %', '21EMA PF', 'Gap Close %', 'Gap Close PF'])
-        perf_table_10_html = perf_df_10.to_html(index=False)
+        perf_df_10 = pd.DataFrame(rows10).sort_values('Year') if rows10 else pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF'])
+        perf_table_10_html = perf_df_10.to_html(index=False, classes='perf-table', table_id='perf-10d')
     else:
-        perf_table_5_html = pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', '21EMA %', '21EMA PF', 'Gap Close %', 'Gap Close PF']).to_html(index=False)
-        perf_table_10_html = pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', '21EMA %', '21EMA PF', 'Gap Close %', 'Gap Close PF']).to_html(index=False)
+        perf_table_5_html = pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF']).to_html(index=False, classes='perf-table')
+        perf_table_10_html = pd.DataFrame(columns=['Year', 'Trades', 'AVWAP %', 'AVWAP PF', 'Gap Close %', 'Gap Close PF', '21EMA %', '21EMA PF']).to_html(index=False, classes='perf-table')
 
     # Charts (changed to monthly with SMA overlay)
     if not monthly.empty:
