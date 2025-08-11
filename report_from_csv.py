@@ -49,6 +49,10 @@ TEMPLATE = """<!doctype html>
       <li><a href="#retracement-bucket">Retracement rate by gap bucket (10d)</a></li>
       <li><a href="#win-gap">Win rate vs gap size</a></li>
       <li><a href="#win-avwap">Win rate vs distance to AVWAP</a></li>
+      <li><a href="#win-21ema-above-below">Win rate: above vs below 21-EMA</a></li>
+      <li><a href="#win-50ema-above-below">Win rate: above vs below 50-EMA</a></li>
+      <li><a href="#win-100ema-above-below">Win rate: above vs below 100-EMA</a></li>
+      <li><a href="#win-200ema-above-below">Win rate: above vs below 200-EMA</a></li>
       <li><a href="#win-sma330-above-below">Win rate: above vs below 330-SMA</a></li>
       <li><a href="#win-sma330-bucket">Win rate by distance to 330-SMA</a></li>
       <li><a href="#win-spy">Win rate vs SPY daily change</a></li>
@@ -127,6 +131,26 @@ TEMPLATE = """<!doctype html>
     <h2>Win rate vs distance to AVWAP</h2>
     {{ fig_avwap_win_5|safe }}
     {{ fig_avwap_win_10|safe }}
+  </div>
+
+  <div class="section" id="win-21ema-above-below">
+    <h2>Win rate: above vs below 21-EMA</h2>
+    {{ fig_21ema_above_below|safe }}
+  </div>
+
+  <div class="section" id="win-50ema-above-below">
+    <h2>Win rate: above vs below 50-EMA</h2>
+    {{ fig_50ema_above_below|safe }}
+  </div>
+
+  <div class="section" id="win-100ema-above-below">
+    <h2>Win rate: above vs below 100-EMA</h2>
+    {{ fig_100ema_above_below|safe }}
+  </div>
+
+  <div class="section" id="win-200ema-above-below">
+    <h2>Win rate: above vs below 200-EMA</h2>
+    {{ fig_200ema_above_below|safe }}
   </div>
 
   <div class="section" id="win-sma330-above-below">
@@ -593,6 +617,47 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_avwap_win_5 = go.Figure().update_layout(title='Win rate vs distance to AVWAP (5d) — no data')
         fig_avwap_win_10 = go.Figure().update_layout(title='Win rate vs distance to AVWAP (10d) — no data')
 
+    # Helper function for EMA/SMA above/below analysis
+    def create_above_below_chart(df, distance_col, label, retraced5_col, retraced10_col):
+        if distance_col in df.columns and (retraced5_col or retraced10_col):
+            dfx = df.copy()
+            dfx['dist'] = pd.to_numeric(dfx[distance_col], errors='coerce')
+            dfx = dfx.dropna(subset=['dist'])
+            if retraced5_col:
+                dfx['win5'] = pd.to_numeric(dfx[retraced5_col], errors='coerce').fillna(0).astype(float)
+            if retraced10_col:
+                dfx['win10'] = pd.to_numeric(dfx[retraced10_col], errors='coerce').fillna(0).astype(float)
+
+            # Above vs Below
+            dfx['above_below'] = np.where(dfx['dist'] >= 0, f'Above {label}', f'Below {label}')
+            parts = []
+            gb_ab = dfx.groupby('above_below', observed=False)
+            if retraced5_col:
+                r5 = gb_ab['win5'].mean().reset_index(name='rate')
+                r5['horizon'] = '5d'
+                parts.append(r5)
+            if retraced10_col:
+                r10 = gb_ab['win10'].mean().reset_index(name='rate')
+                r10['horizon'] = '10d'
+                parts.append(r10)
+            if parts:
+                ab_long = pd.concat(parts, ignore_index=True)
+                ab_long['rate'] = 100 * ab_long['rate']
+                return px.bar(
+                    ab_long, x='above_below', y='rate', color='horizon', barmode='group',
+                    title=f'Win rate: above vs below {label} (%)'
+                )
+            else:
+                return px.scatter(title=f'Win rate: above vs below {label} (n/a)')
+        else:
+            return px.scatter(title=f'Win rate: above vs below {label} (no data)')
+
+    # Win rate vs various EMAs/SMAs (above/below)
+    fig_21ema_above_below = create_above_below_chart(df, 'sma_21_distance_percent', '21-EMA', retraced5_col, retraced10_col)
+    fig_50ema_above_below = create_above_below_chart(df, 'sma_50_distance_percent', '50-EMA', retraced5_col, retraced10_col)
+    fig_100ema_above_below = create_above_below_chart(df, 'sma_100_distance_percent', '100-EMA', retraced5_col, retraced10_col)
+    fig_200ema_above_below = create_above_below_chart(df, 'sma_200_distance_percent', '200-EMA', retraced5_col, retraced10_col)
+
     # Win rate vs 330-SMA (above/below) and by distance buckets
     if 'sma_330_distance_percent' in df.columns and (retraced5_col or retraced10_col):
         dfx = df.copy()
@@ -800,6 +865,10 @@ def build_report(csv_path: str, out_path: str) -> None:
         fig_gap_win_10=fig_gap_win_10.to_html(include_plotlyjs=False, full_html=False),
         fig_avwap_win_5=fig_avwap_win_5.to_html(include_plotlyjs=False, full_html=False),
         fig_avwap_win_10=fig_avwap_win_10.to_html(include_plotlyjs=False, full_html=False),
+        fig_21ema_above_below=fig_21ema_above_below.to_html(include_plotlyjs=False, full_html=False),
+        fig_50ema_above_below=fig_50ema_above_below.to_html(include_plotlyjs=False, full_html=False),
+        fig_100ema_above_below=fig_100ema_above_below.to_html(include_plotlyjs=False, full_html=False),
+        fig_200ema_above_below=fig_200ema_above_below.to_html(include_plotlyjs=False, full_html=False),
         fig_sma330_above_below=fig_sma330_above_below.to_html(include_plotlyjs=False, full_html=False),
         fig_sma330_bucket_5=fig_sma330_bucket_5.to_html(include_plotlyjs=False, full_html=False),
         fig_sma330_bucket_10=fig_sma330_bucket_10.to_html(include_plotlyjs=False, full_html=False),
