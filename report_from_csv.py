@@ -74,9 +74,9 @@ TEMPLATE = """<!doctype html>
     <p>AVWAP retrace rate: 5d: {{ overall_win_rate_5d }}% | 10d: {{ overall_win_rate_10d }}%</p>
     <p>21 EMA retrace rate: 5d: {{ ema_21_retrace_rate_5d }}% &nbsp;|&nbsp; 10d: {{ ema_21_retrace_rate_10d }}%</p>
     <p>Gap closure rate: 5d: {{ gap_close_rate_5d }}% &nbsp;|&nbsp; 10d: {{ gap_close_rate_10d }}%</p>
-    <h3>5-day performance by year</h3>
+    <h3>Gap Retrace Within 5 Days</h3>
     <div class="table-container">{{ perf_table_5|safe }}</div>
-    <h3>10-day performance by year</h3>
+    <h3>Gap Retrace Within 10 Days</h3>
     <div class="table-container">{{ perf_table_10|safe }}</div>
   </div>
 
