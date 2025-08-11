@@ -570,7 +570,13 @@ def build_report(csv_path: str, out_path: str) -> None:
                          retraced10=(retraced10_col, 'mean'))
                     .reset_index())
         bucket['rate10'] = 100 * bucket['retraced10']
-        fig_bucket = px.bar(bucket, x='gap_bucket', y='rate10', title='10d retracement rate by gap bucket (%)')
+        import plotly.graph_objects as go
+        fig_bucket = go.Figure(data=[
+            go.Bar(x=bucket['gap_bucket'], y=bucket['rate10'],
+                   text=[f'{rate:.1f}%' for rate in bucket['rate10']],
+                   textposition='outside')
+        ])
+        fig_bucket.update_layout(title='10d retracement rate by gap bucket (%)')
     else:
         fig_bucket = px.scatter(title='No bucket data')
 
@@ -587,13 +593,25 @@ def build_report(csv_path: str, out_path: str) -> None:
         if retraced5_col:
             gap_win_5 = (gb['win5'].mean().reset_index(name='rate'))
             gap_win_5['rate'] = 100 * gap_win_5['rate']
-            fig_gap_win_5 = px.bar(gap_win_5, x='gap_bucket', y='rate', title='Win rate vs gap size (5d, %)')
+            import plotly.graph_objects as go
+            fig_gap_win_5 = go.Figure(data=[
+                go.Bar(x=gap_win_5['gap_bucket'], y=gap_win_5['rate'],
+                       text=[f'{rate:.1f}%' for rate in gap_win_5['rate']],
+                       textposition='outside')
+            ])
+            fig_gap_win_5.update_layout(title='Win rate vs gap size (5d, %)')
         else:
             fig_gap_win_5 = px.scatter(title='Win rate vs gap size (5d unavailable)')
         if retraced10_col:
             gap_win_10 = (gb['win10'].mean().reset_index(name='rate'))
             gap_win_10['rate'] = 100 * gap_win_10['rate']
-            fig_gap_win_10 = px.bar(gap_win_10, x='gap_bucket', y='rate', title='Win rate vs gap size (10d, %)')
+            import plotly.graph_objects as go
+            fig_gap_win_10 = go.Figure(data=[
+                go.Bar(x=gap_win_10['gap_bucket'], y=gap_win_10['rate'],
+                       text=[f'{rate:.1f}%' for rate in gap_win_10['rate']],
+                       textposition='outside')
+            ])
+            fig_gap_win_10.update_layout(title='Win rate vs gap size (10d, %)')
         else:
             fig_gap_win_10 = px.scatter(title='Win rate vs gap size (10d unavailable)')
     else:
@@ -627,13 +645,25 @@ def build_report(csv_path: str, out_path: str) -> None:
         if retraced5_col:
             avwap_win_5 = (gv['win5'].mean().reset_index(name='rate'))
             avwap_win_5['rate'] = 100 * avwap_win_5['rate']
-            fig_avwap_win_5 = px.bar(avwap_win_5, x='dist_bucket', y='rate', title='Win rate vs distance to AVWAP (5d, %)')
+            import plotly.graph_objects as go
+            fig_avwap_win_5 = go.Figure(data=[
+                go.Bar(x=avwap_win_5['dist_bucket'], y=avwap_win_5['rate'],
+                       text=[f'{rate:.1f}%' for rate in avwap_win_5['rate']],
+                       textposition='outside')
+            ])
+            fig_avwap_win_5.update_layout(title='Win rate vs distance to AVWAP (5d, %)')
         else:
             fig_avwap_win_5 = px.scatter(title='Win rate vs distance to AVWAP (5d unavailable)')
         if retraced10_col:
             avwap_win_10 = (gv['win10'].mean().reset_index(name='rate'))
             avwap_win_10['rate'] = 100 * avwap_win_10['rate']
-            fig_avwap_win_10 = px.bar(avwap_win_10, x='dist_bucket', y='rate', title='Win rate vs distance to AVWAP (10d, %)')
+            import plotly.graph_objects as go
+            fig_avwap_win_10 = go.Figure(data=[
+                go.Bar(x=avwap_win_10['dist_bucket'], y=avwap_win_10['rate'],
+                       text=[f'{rate:.1f}%' for rate in avwap_win_10['rate']],
+                       textposition='outside')
+            ])
+            fig_avwap_win_10.update_layout(title='Win rate vs distance to AVWAP (10d, %)')
         else:
             fig_avwap_win_10 = px.scatter(title='Win rate vs distance to AVWAP (10d unavailable)')
     else:
@@ -667,10 +697,25 @@ def build_report(csv_path: str, out_path: str) -> None:
             if parts:
                 ab_long = pd.concat(parts, ignore_index=True)
                 ab_long['rate'] = 100 * ab_long['rate']
-                return px.bar(
-                    ab_long, x='above_below', y='rate', color='horizon', barmode='group',
-                    title=f'Win rate: above vs below {label} (%)'
+                import plotly.graph_objects as go
+                fig = go.Figure()
+                
+                # Group data by horizon for grouped bars
+                for horizon in ab_long['horizon'].unique():
+                    horizon_data = ab_long[ab_long['horizon'] == horizon]
+                    fig.add_trace(go.Bar(
+                        x=horizon_data['above_below'],
+                        y=horizon_data['rate'],
+                        name=horizon,
+                        text=[f'{rate:.1f}%' for rate in horizon_data['rate']],
+                        textposition='outside'
+                    ))
+                
+                fig.update_layout(
+                    title=f'Win rate: above vs below {label} (%)',
+                    barmode='group'
                 )
+                return fig
             else:
                 return px.scatter(title=f'Win rate: above vs below {label} (n/a)')
         else:
@@ -713,9 +758,23 @@ def build_report(csv_path: str, out_path: str) -> None:
         if parts:
             ab_long = pd.concat(parts, ignore_index=True)
             ab_long['rate'] = 100 * ab_long['rate']
-            fig_sma330_above_below = px.bar(
-                ab_long, x='above_below', y='rate', color='horizon', barmode='group',
-                title='Win rate: above vs below 330-SMA (%)'
+            import plotly.graph_objects as go
+            fig_sma330_above_below = go.Figure()
+            
+            # Group data by horizon for grouped bars
+            for horizon in ab_long['horizon'].unique():
+                horizon_data = ab_long[ab_long['horizon'] == horizon]
+                fig_sma330_above_below.add_trace(go.Bar(
+                    x=horizon_data['above_below'],
+                    y=horizon_data['rate'],
+                    name=horizon,
+                    text=[f'{rate:.1f}%' for rate in horizon_data['rate']],
+                    textposition='outside'
+                ))
+            
+            fig_sma330_above_below.update_layout(
+                title='Win rate: above vs below 330-SMA (%)',
+                barmode='group'
             )
         else:
             fig_sma330_above_below = px.scatter(title='Win rate: above vs below 330-SMA (n/a)')
@@ -729,15 +788,25 @@ def build_report(csv_path: str, out_path: str) -> None:
         if retraced5_col:
             b5 = gv['win5'].mean().reset_index(name='rate')
             b5['rate'] = 100 * b5['rate']
-            fig_sma330_bucket_5 = px.bar(b5, x='sma_bucket', y='rate',
-                                         title='Win rate vs distance to 330-SMA (5d, %)')
+            import plotly.graph_objects as go
+            fig_sma330_bucket_5 = go.Figure(data=[
+                go.Bar(x=b5['sma_bucket'], y=b5['rate'],
+                       text=[f'{rate:.1f}%' for rate in b5['rate']],
+                       textposition='outside')
+            ])
+            fig_sma330_bucket_5.update_layout(title='Win rate vs distance to 330-SMA (5d, %)')
         else:
             fig_sma330_bucket_5 = px.scatter(title='Win rate vs distance to 330-SMA (5d unavailable)')
         if retraced10_col:
             b10 = gv['win10'].mean().reset_index(name='rate')
             b10['rate'] = 100 * b10['rate']
-            fig_sma330_bucket_10 = px.bar(b10, x='sma_bucket', y='rate',
-                                          title='Win rate vs distance to 330-SMA (10d, %)')
+            import plotly.graph_objects as go
+            fig_sma330_bucket_10 = go.Figure(data=[
+                go.Bar(x=b10['sma_bucket'], y=b10['rate'],
+                       text=[f'{rate:.1f}%' for rate in b10['rate']],
+                       textposition='outside')
+            ])
+            fig_sma330_bucket_10.update_layout(title='Win rate vs distance to 330-SMA (10d, %)')
         else:
             fig_sma330_bucket_10 = px.scatter(title='Win rate vs distance to 330-SMA (10d unavailable)')
     else:
@@ -761,13 +830,25 @@ def build_report(csv_path: str, out_path: str) -> None:
         if retraced5_col:
             spy_win_5 = gs['win5'].mean().reset_index(name='rate')
             spy_win_5['rate'] = 100 * spy_win_5['rate']
-            fig_spy_bucket_5 = px.bar(spy_win_5, x='spy_bucket', y='rate', title='Win rate vs SPY daily change (5d, %)')
+            import plotly.graph_objects as go
+            fig_spy_bucket_5 = go.Figure(data=[
+                go.Bar(x=spy_win_5['spy_bucket'], y=spy_win_5['rate'],
+                       text=[f'{rate:.1f}%' for rate in spy_win_5['rate']],
+                       textposition='outside')
+            ])
+            fig_spy_bucket_5.update_layout(title='Win rate vs SPY daily change (5d, %)')
         else:
             fig_spy_bucket_5 = px.scatter(title='Win rate vs SPY daily change (5d unavailable)')
         if retraced10_col:
             spy_win_10 = gs['win10'].mean().reset_index(name='rate')
             spy_win_10['rate'] = 100 * spy_win_10['rate']
-            fig_spy_bucket_10 = px.bar(spy_win_10, x='spy_bucket', y='rate', title='Win rate vs SPY daily change (10d, %)')
+            import plotly.graph_objects as go
+            fig_spy_bucket_10 = go.Figure(data=[
+                go.Bar(x=spy_win_10['spy_bucket'], y=spy_win_10['rate'],
+                       text=[f'{rate:.1f}%' for rate in spy_win_10['rate']],
+                       textposition='outside')
+            ])
+            fig_spy_bucket_10.update_layout(title='Win rate vs SPY daily change (10d, %)')
         else:
             fig_spy_bucket_10 = px.scatter(title='Win rate vs SPY daily change (10d unavailable)')
     else:
