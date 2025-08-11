@@ -62,6 +62,7 @@ TEMPLATE = """<!doctype html>
       <li><a href="#win-spy">Win rate vs SPY daily change</a></li>
       <li><a href="#equity-curve">Expected P&L (10k/trade) — Equity Curve</a></li>
       <li><a href="#gap-retrace-scatter">Gap size vs 10d retrace %</a></li>
+      <li><a href="#days-to-retrace">Days to AVWAP retracement clustering</a></li>
       <li><a href="#spy-retrace">SPY vs 10d retrace rate (by day)</a></li>
       <li><a href="#top-mfe">Top 20 by 10d MFE%</a></li>
     </ul>
@@ -203,6 +204,12 @@ TEMPLATE = """<!doctype html>
   <div class="section" id="gap-retrace-scatter">
     <h2>Gap size vs 10d retrace %</h2>
     {{ fig_scatter|safe }}
+  </div>
+
+  <div class="section" id="days-to-retrace">
+    <h2>Days to AVWAP retracement clustering</h2>
+    {{ fig_days_to_retrace_5d|safe }}
+    {{ fig_days_to_retrace_10d|safe }}
   </div>
 
   <div class="section" id="spy-retrace">
@@ -927,6 +934,66 @@ def build_report(csv_path: str, out_path: str) -> None:
     else:
         fig_scatter = px.scatter(title='No retrace percentage data')
 
+    # Days to AVWAP retracement clustering
+    days_5d_col = 'days_to_retrace_5d' if 'days_to_retrace_5d' in df.columns else None
+    days_10d_col = 'days_to_retrace_10d' if 'days_to_retrace_10d' in df.columns else None
+    
+    if days_5d_col and retraced5_col:
+        # Filter to only successful retracements and valid days
+        df_days_5d = df[pd.to_numeric(df[retraced5_col], errors='coerce') == 1].copy()
+        df_days_5d['days'] = pd.to_numeric(df_days_5d[days_5d_col], errors='coerce')
+        df_days_5d = df_days_5d.dropna(subset=['days'])
+        
+        if not df_days_5d.empty:
+            # Count trades by day
+            days_count_5d = df_days_5d['days'].value_counts().sort_index().reset_index()
+            days_count_5d.columns = ['Day', 'Count']
+            days_count_5d['Percentage'] = (days_count_5d['Count'] / days_count_5d['Count'].sum()) * 100
+            
+            import plotly.graph_objects as go
+            fig_days_to_retrace_5d = go.Figure(data=[
+                go.Bar(x=days_count_5d['Day'], y=days_count_5d['Count'],
+                       text=[f'{count}<br>({pct:.1f}%)' for count, pct in zip(days_count_5d['Count'], days_count_5d['Percentage'])],
+                       textposition='outside')
+            ])
+            fig_days_to_retrace_5d.update_layout(
+                title='Days to AVWAP retracement (5d successful trades)',
+                xaxis_title='Days to reach AVWAP',
+                yaxis_title='Number of trades'
+            )
+        else:
+            fig_days_to_retrace_5d = px.scatter(title='Days to AVWAP retracement (5d) - no successful retracements')
+    else:
+        fig_days_to_retrace_5d = px.scatter(title='Days to AVWAP retracement (5d) - no data')
+    
+    if days_10d_col and retraced10_col:
+        # Filter to only successful retracements and valid days
+        df_days_10d = df[pd.to_numeric(df[retraced10_col], errors='coerce') == 1].copy()
+        df_days_10d['days'] = pd.to_numeric(df_days_10d[days_10d_col], errors='coerce')
+        df_days_10d = df_days_10d.dropna(subset=['days'])
+        
+        if not df_days_10d.empty:
+            # Count trades by day
+            days_count_10d = df_days_10d['days'].value_counts().sort_index().reset_index()
+            days_count_10d.columns = ['Day', 'Count']
+            days_count_10d['Percentage'] = (days_count_10d['Count'] / days_count_10d['Count'].sum()) * 100
+            
+            import plotly.graph_objects as go
+            fig_days_to_retrace_10d = go.Figure(data=[
+                go.Bar(x=days_count_10d['Day'], y=days_count_10d['Count'],
+                       text=[f'{count}<br>({pct:.1f}%)' for count, pct in zip(days_count_10d['Count'], days_count_10d['Percentage'])],
+                       textposition='outside')
+            ])
+            fig_days_to_retrace_10d.update_layout(
+                title='Days to AVWAP retracement (10d successful trades)',
+                xaxis_title='Days to reach AVWAP',
+                yaxis_title='Number of trades'
+            )
+        else:
+            fig_days_to_retrace_10d = px.scatter(title='Days to AVWAP retracement (10d) - no successful retracements')
+    else:
+        fig_days_to_retrace_10d = px.scatter(title='Days to AVWAP retracement (10d) - no data')
+
     # SPY vs 10d retrace rate (by day)
     if 'spy_daily_gain_percent' in df.columns and retraced10_col and not df.empty:
         spy = (df.groupby('date')
@@ -996,6 +1063,8 @@ def build_report(csv_path: str, out_path: str) -> None:
         total_pnl_5d=total_pnl_5d,
         total_pnl_10d=total_pnl_10d,
         fig_scatter=fig_scatter.to_html(include_plotlyjs=False, full_html=False),
+        fig_days_to_retrace_5d=fig_days_to_retrace_5d.to_html(include_plotlyjs=False, full_html=False),
+        fig_days_to_retrace_10d=fig_days_to_retrace_10d.to_html(include_plotlyjs=False, full_html=False),
         fig_spy=fig_spy.to_html(include_plotlyjs=False, full_html=False),
         top_mfe=top_html
     )
