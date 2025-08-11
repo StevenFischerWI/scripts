@@ -718,6 +718,8 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
         gap_size = abs(open_price - prev_close)  # Actual gap size
         retrace_pct_5 = 0.0
         retrace_pct_10 = 0.0
+        gap_filled_5d = False
+        gap_filled_10d = False
         
         if gap_size > 0:
             if gap_mode == 'up':
@@ -727,9 +729,11 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
                 if pd.notna(ll5):
                     actual_retrace_5 = max(0.0, open_price - float(ll5))
                     retrace_pct_5 = (actual_retrace_5 / gap_size) * 100
+                    gap_filled_5d = float(ll5) <= prev_close  # True if price reached or went below previous close
                 if pd.notna(ll10):
                     actual_retrace_10 = max(0.0, open_price - float(ll10))
                     retrace_pct_10 = (actual_retrace_10 / gap_size) * 100
+                    gap_filled_10d = float(ll10) <= prev_close  # True if price reached or went below previous close
             else:
                 # For gap-downs, measure how much it retraced back toward previous close
                 hh5 = hh5_map.get(symbol, np.nan)
@@ -737,9 +741,11 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
                 if pd.notna(hh5):
                     actual_retrace_5 = max(0.0, float(hh5) - open_price)
                     retrace_pct_5 = (actual_retrace_5 / gap_size) * 100
+                    gap_filled_5d = float(hh5) >= prev_close  # True if price reached or went above previous close
                 if pd.notna(hh10):
                     actual_retrace_10 = max(0.0, float(hh10) - open_price)
                     retrace_pct_10 = (actual_retrace_10 / gap_size) * 100
+                    gap_filled_10d = float(hh10) >= prev_close  # True if price reached or went above previous close
 
         # MFE/MAE maps
         mfe5, mae5, mfe5p, mae5p = mfe_mae_5_map.get(symbol, (0.0, 0.0, 0.0, 0.0))
@@ -767,6 +773,7 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
             'days_to_retrace_5d': days5 if days5 is not None else '',
             'retrace_percentage_5d': round(avwap_retrace_pct_5, 2),
             'gap_closure_percentage_5d': round(retrace_pct_5, 2),
+            'gap_filled_5d': gap_filled_5d,
             'mfe_dollars_5d': round(mfe5, 2),
             'mae_dollars_5d': round(mae5, 2),
             'mfe_percent_5d': round(mfe5p, 2),
@@ -775,6 +782,7 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
             'days_to_retrace_10d': days10 if days10 is not None else '',
             'retrace_percentage_10d': round(avwap_retrace_pct_10, 2),
             'gap_closure_percentage_10d': round(retrace_pct_10, 2),
+            'gap_filled_10d': gap_filled_10d,
             'mfe_dollars_10d': round(mfe10, 2),
             'mae_dollars_10d': round(mae10, 2),
             'mfe_percent_10d': round(mfe10p, 2),
@@ -806,6 +814,7 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
             'days_to_retrace_5d': days5,
             'retrace_percentage_5d': avwap_retrace_pct_5,
             'gap_closure_percentage_5d': retrace_pct_5,
+            'gap_filled_5d': gap_filled_5d,
             'mfe_dollars_5d': mfe5,
             'mae_dollars_5d': mae5,
             'mfe_percent_5d': mfe5p,
@@ -814,6 +823,7 @@ def analyze_gap_ups_for_date_parallel(conn, date: str, gap_mode: str = 'up') -> 
             'days_to_retrace': days10,
             'retrace_percentage': avwap_retrace_pct_10,
             'gap_closure_percentage': retrace_pct_10,
+            'gap_filled_10d': gap_filled_10d,
             'mfe_dollars': mfe10,
             'mae_dollars': mae10,
             'mfe_percent': mfe10p,
@@ -922,8 +932,8 @@ def main():
         
         fieldnames = [
             'ticker','date','gap_up_percent','open_price','close_price','anchored_vwap',
-            'retraced_to_vwap_5d','days_to_retrace_5d','retrace_percentage_5d','gap_closure_percentage_5d','mfe_dollars_5d','mae_dollars_5d','mfe_percent_5d','mae_percent_5d',
-            'retraced_to_vwap_10d','days_to_retrace_10d','retrace_percentage_10d','gap_closure_percentage_10d','mfe_dollars_10d','mae_dollars_10d','mfe_percent_10d','mae_percent_10d',
+            'retraced_to_vwap_5d','days_to_retrace_5d','retrace_percentage_5d','gap_closure_percentage_5d','gap_filled_5d','mfe_dollars_5d','mae_dollars_5d','mfe_percent_5d','mae_percent_5d',
+            'retraced_to_vwap_10d','days_to_retrace_10d','retrace_percentage_10d','gap_closure_percentage_10d','gap_filled_10d','mfe_dollars_10d','mae_dollars_10d','mfe_percent_10d','mae_percent_10d',
             'ema_21','retraced_to_21ema_5d','days_to_21ema_5d','retraced_to_21ema_10d','days_to_21ema_10d',
             'sma_21_distance_percent','sma_50_distance_percent','sma_100_distance_percent','sma_200_distance_percent','sma_330_distance_percent',
             'avwap_current_distance_percent','avwap_2q_ago_distance_percent','avwap_3q_ago_distance_percent','avwap_1y_ago_distance_percent',

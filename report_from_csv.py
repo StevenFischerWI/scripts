@@ -296,18 +296,16 @@ def build_report(csv_path: str, out_path: str) -> None:
     retrace_pct_10_col = 'retrace_percentage_10d' if 'retrace_percentage_10d' in df.columns else ('retrace_percentage' if 'retrace_percentage' in df.columns else None)
     retrace_pct_5_col = 'retrace_percentage_5d' if 'retrace_percentage_5d' in df.columns else None
 
-    # Calculate gap closure metrics using the new gap_closure_percentage columns
+    # Calculate gap closure metrics using the new gap_filled boolean columns
     gap_close_rate_5d = "n/a"
     gap_close_rate_10d = "n/a"
-    gap_closure_5d_col = 'gap_closure_percentage_5d' if 'gap_closure_percentage_5d' in df.columns else None
-    gap_closure_10d_col = 'gap_closure_percentage_10d' if 'gap_closure_percentage_10d' in df.columns else None
+    gap_filled_5d_col = 'gap_filled_5d' if 'gap_filled_5d' in df.columns else None
+    gap_filled_10d_col = 'gap_filled_10d' if 'gap_filled_10d' in df.columns else None
     
-    if gap_closure_5d_col and len(df) > 0:
-        df['gap_closed_5d'] = pd.to_numeric(df[gap_closure_5d_col], errors='coerce') >= 100
-        gap_close_rate_5d = f"{(100.0 * df['gap_closed_5d'].mean()):.2f}"
-    if gap_closure_10d_col and len(df) > 0:
-        df['gap_closed_10d'] = pd.to_numeric(df[gap_closure_10d_col], errors='coerce') >= 100
-        gap_close_rate_10d = f"{(100.0 * df['gap_closed_10d'].mean()):.2f}"
+    if gap_filled_5d_col and len(df) > 0:
+        gap_close_rate_5d = f"{(100.0 * pd.to_numeric(df[gap_filled_5d_col], errors='coerce').fillna(0).mean()):.2f}"
+    if gap_filled_10d_col and len(df) > 0:
+        gap_close_rate_10d = f"{(100.0 * pd.to_numeric(df[gap_filled_10d_col], errors='coerce').fillna(0).mean()):.2f}"
 
     # Calculate 21 EMA retracement rates
     ema_21_retrace_rate_5d = "n/a"
@@ -391,10 +389,10 @@ def build_report(csv_path: str, out_path: str) -> None:
                 ema_rate_5 = np.nan
                 ema_pf_5 = np.nan
 
-            # Gap closure rate and profit factor using gap_closure_percentage_5d
-            gap_closure_5d_col = 'gap_closure_percentage_5d' if 'gap_closure_percentage_5d' in g.columns else None
-            if gap_closure_5d_col and trades > 0:
-                gap_closed_5 = pd.to_numeric(g[gap_closure_5d_col], errors='coerce') >= 100
+            # Gap closure rate and profit factor using gap_filled_5d
+            gap_filled_5d_col = 'gap_filled_5d' if 'gap_filled_5d' in g.columns else None
+            if gap_filled_5d_col and trades > 0:
+                gap_closed_5 = pd.to_numeric(g[gap_filled_5d_col], errors='coerce').fillna(0).astype(bool)
                 gap_rate_5 = 100.0 * gap_closed_5.mean()
                 # Calculate gap closure profit factor using binary win/loss
                 gap_wins_5 = gap_closed_5.sum()
@@ -445,10 +443,10 @@ def build_report(csv_path: str, out_path: str) -> None:
                 ema_rate_10 = np.nan
                 ema_pf_10 = np.nan
 
-            # Gap closure rate and profit factor using gap_closure_percentage_10d
-            gap_closure_10d_col = 'gap_closure_percentage_10d' if 'gap_closure_percentage_10d' in g.columns else None
-            if gap_closure_10d_col and trades > 0:
-                gap_closed_10 = pd.to_numeric(g[gap_closure_10d_col], errors='coerce') >= 100
+            # Gap closure rate and profit factor using gap_filled_10d
+            gap_filled_10d_col = 'gap_filled_10d' if 'gap_filled_10d' in g.columns else None
+            if gap_filled_10d_col and trades > 0:
+                gap_closed_10 = pd.to_numeric(g[gap_filled_10d_col], errors='coerce').fillna(0).astype(bool)
                 gap_rate_10 = 100.0 * gap_closed_10.mean()
                 # Calculate gap closure profit factor using binary win/loss
                 gap_wins_10 = gap_closed_10.sum()
